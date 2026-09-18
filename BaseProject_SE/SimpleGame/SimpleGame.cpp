@@ -16,20 +16,32 @@ but WITHOUT ANY WARRANTY.
 #include <iostream>
 #include "Renderer.h"
 #include "Tutorial.h"
+#include "LevelOne.h"
+#include <string>
 
 namespace
 {
     std::unique_ptr<Renderer> renderer;
     std::unique_ptr<Tutorial> tutorial;
+    std::unique_ptr<LevelOne> level;
     int previousTime = 0;
     HWND gameWindow = nullptr;
 
     void Display()
     {
-        if (!renderer || !tutorial)
+        if (!renderer)
+        {
             return;
+        }
 
-        tutorial->Render(*renderer);
+        if (level)
+        {
+            level->Render(*renderer);
+        }
+        else if (tutorial)
+        {
+            tutorial->Render(*renderer);
+        }
         glutSwapBuffers();
     }
 
@@ -42,38 +54,84 @@ namespace
 
     void Down(unsigned char key, int, int)
     {
-        if (tutorial)
+        if (level)
+        {
+            level->KeyDown(key);
+        }
+        else if (tutorial)
+        {
             tutorial->KeyDown(key);
+        }
     }
 
     void Up(unsigned char key, int, int)
     {
-        if (tutorial)
+        if (level)
+        {
+            level->KeyUp(key);
+        }
+        else if (tutorial)
+        {
             tutorial->KeyUp(key);
+        }
+    }
+
+    void Mouse(int button, int state, int x, int y)
+    {
+        Point canvas;
+
+        if (level && renderer && button == GLUT_LEFT_BUTTON && state == GLUT_DOWN &&
+            renderer->ToCanvas(x, y, canvas))
+        {
+            level->AttackAt(canvas);
+        }
     }
 
     void Close()
     {
         // Free GPU objects while freeglut still has the current context.
-        renderer.reset();
+        level.reset();
         tutorial.reset();
+        renderer.reset();
     }
 
     void Tick(int)
     {
-        if (!tutorial)
+        if (!tutorial && !level)
+        {
             return;
+        }
 
         int now = glutGet(GLUT_ELAPSED_TIME);
         float dt = (now - previousTime) * .001f;
         previousTime = now;
 
-        if (GetForegroundWindow() == gameWindow)
-            tutorial->Update(dt);
-        else
-            tutorial->ClearInput();
+        bool focused = GetForegroundWindow() == gameWindow;
 
-        if (tutorial->WantsQuit())
+        if (level)
+        {
+            if (focused)
+            {
+                level->Update(dt);
+            }
+            else
+            {
+                level->ClearInput();
+            }
+        }
+        else if (tutorial)
+        {
+            if (focused)
+            {
+                tutorial->Update(dt);
+            }
+            else
+            {
+                tutorial->ClearInput();
+            }
+        }
+
+        if ((level && level->WantsQuit()) || (tutorial && tutorial->WantsQuit()))
         {
             glutLeaveMainLoop();
             return;
@@ -87,6 +145,27 @@ namespace
 int main(int argc, char** argv)
 {
     SetConsoleOutputCP(CP_UTF8);
+    bool tutorialMode = false;
+
+    for (int i = 1; i < argc;)
+    {
+        if (std::string(argv[i]) == "--tutorial")
+        {
+            tutorialMode = true;
+
+            for (int j = i; j < argc; ++j)
+            {
+                argv[j] = argv[j + 1];
+            }
+
+            --argc;
+        }
+        else
+        {
+            ++i;
+        }
+    }
+
     glutInit(&argc, argv);
     glutInitContextVersion(3, 3);
     glutInitContextProfile(GLUT_CORE_PROFILE);
@@ -99,7 +178,7 @@ int main(int argc, char** argv)
         gameWindow = GetActiveWindow();
 
     if (gameWindow)
-        SetWindowTextW(gameWindow, L"재와 갈대 - 마지막 모닥불");
+        SetWindowTextW(gameWindow, tutorialMode ? L"재와 갈대 - 마지막 모닥불" : L"재와 갈대 - 첫 사냥터");
     glewExperimental = GL_TRUE;
     GLenum status = glewInit();
 
@@ -128,17 +207,26 @@ int main(int argc, char** argv)
         return 1;
     }
 
-    tutorial.reset(new Tutorial());
+    if (tutorialMode)
+    {
+        tutorial.reset(new Tutorial());
+    }
+    else
+    {
+        level.reset(new LevelOne());
+    }
     glutSetOption(GLUT_ACTION_ON_WINDOW_CLOSE, GLUT_ACTION_CONTINUE_EXECUTION);
     glutIgnoreKeyRepeat(1);
     glutDisplayFunc(Display);
     glutReshapeFunc(Resize);
     glutKeyboardFunc(Down);
     glutKeyboardUpFunc(Up);
+    glutMouseFunc(Mouse);
     glutCloseFunc(Close);
     previousTime = glutGet(GLUT_ELAPSED_TIME);
     glutTimerFunc(16, Tick, 0);
     glutMainLoop();
+    level.reset();
     tutorial.reset();
     renderer.reset();
 

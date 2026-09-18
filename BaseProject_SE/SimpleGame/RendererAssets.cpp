@@ -3,6 +3,7 @@
 #define NOMINMAX
 #endif
 #include "Renderer.h"
+#include "GameStorage.h"
 #include <windows.h>
 #include <unordered_map>
 #include <cmath>
@@ -138,7 +139,7 @@ bool Renderer::CreateAssets()
     font->Get(L'?', fontTex);
     BakeCharacters();
 
-    return sprites != 0 && fontTex != 0;
+    return sprites != 0 && fontTex != 0 && CreateModels();
 }
 
 void Renderer::ReleaseAssets()
@@ -236,6 +237,24 @@ void Renderer::Text(float x, float y, const std::string& text, Color color, floa
 
 void Renderer::BakeCharacters()
 {
+    constexpr uint32_t Version = 1;
+    constexpr size_t PixelBytes = 1536 * 768 * 4;
+    std::vector<unsigned char> pixels;
+
+    if (GameStorage::Read(L"characters.cache", Version, PixelBytes, pixels) && pixels.size() == PixelBytes)
+    {
+        glActiveTexture(GL_TEXTURE0);
+        glGenTextures(1, &sprites);
+        glBindTexture(GL_TEXTURE_2D, sprites);
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, 1536, 768, 0, GL_RGBA, GL_UNSIGNED_BYTE, pixels.data());
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+        std::cout << "캐릭터 애니메이션 캐시 불러오기 완료\n";
+        return;
+    }
+
     GLuint atlasFbo = 0;
 
     if (!Target(atlasFbo, sprites, 1536, 768, GL_RGBA8))
@@ -390,6 +409,12 @@ void Renderer::BakeCharacters()
 
     Flush();
     sprites = atlas;
+    pixels.resize(PixelBytes);
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, sprites);
+    glGetTexImage(GL_TEXTURE_2D, 0, GL_RGBA, GL_UNSIGNED_BYTE, pixels.data());
+    GameStorage::Write(L"characters.cache", Version, pixels);
+    std::cout << "캐릭터 애니메이션 생성 완료\n";
     canvasW = Width;
     canvasH = Height;
     glBindFramebuffer(GL_FRAMEBUFFER, 0);

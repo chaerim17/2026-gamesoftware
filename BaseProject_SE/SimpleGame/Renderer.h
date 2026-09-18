@@ -1,4 +1,5 @@
 ﻿#pragma once
+#include <array>
 #include <vector>
 #include <string>
 #include "Dependencies/glew.h"
@@ -27,7 +28,21 @@ enum class Material
     Wood = 6,
     Thatch = 7,
     Sprite = 8,
-    Font = 9
+    Font = 9,
+    Flame = 10
+};
+
+enum class ModelKind
+{
+    Pine,
+    Rock,
+    Boar,
+    Wolf,
+    Deer,
+    Supply,
+    Cabin,
+    Camp,
+    Count
 };
 
 class Renderer
@@ -67,6 +82,15 @@ class Renderer
     void Ellipse(float x, float y, float rx, float ry, Color color, int segments = 24);
     void Line(Point a, Point b, float thickness, Color color);
     void SoftShadow(Point center, float rx, float ry, float length, float opacity);
+    void Model(ModelKind kind,
+        Point base,
+        float scale = 1,
+        float opacity = 1,
+        float gait = 0,
+        int facing = 1,
+        float flash = 0);
+    void Flame(Point base, float scale = 1);
+    bool ToCanvas(int x, int y, Point& output) const;
     void Character(Point feet, int appearance, int direction, int frame);
     void Text(
         float x, float y, const std::string& utf8, Color color, float scale = 2.f, float maxWidth = 0.f);
@@ -88,6 +112,8 @@ class Renderer
     bool CreateAssets();
     void ReleaseAssets();
     void BakeCharacters();
+    bool CreateModels();
+    void BuildModel(ModelKind kind);
     GLuint program = 0, post = 0, vao = 0, vbo = 0;
     GLuint sceneFbo = 0, sceneTex = 0, shadowFbo = 0, shadowTex = 0;
     GLuint bloomFbo[2] = {}, bloomTex[2] = {};
@@ -95,7 +121,9 @@ class Renderer
     FontCache* font = nullptr;
     GLint canvasLocation = -1, timeLocation = -1, passLocation = -1, effectsLocation = -1;
     float canvasW = 1280, canvasH = 800, clock = 0;
+    int windowHeight = 800;
     int viewportX = 0, viewportY = 0, viewportW = 1280, viewportH = 800;
     bool initialized = false, worldFinished = false, postEnabled = true;
     std::vector<Vertex> vertices;
+    std::array<std::vector<Vertex>, static_cast<size_t>(ModelKind::Count)> models;
 };

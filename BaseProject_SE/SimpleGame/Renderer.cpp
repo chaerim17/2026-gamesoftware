@@ -112,6 +112,36 @@ void main()
         c.a *= texture(fontAtlas, uv).r;
     }
 
+    if (kind == 10)
+    {
+        // The quad is static; flame shape, rising smoke and embers live in the shader.
+        float height = 1. - uv.y;
+        float wobble = sin(height * 10. - clock * 5.) * .055;
+        float turbulence = noise(vec2(uv.x * 6., height * 8. - clock * 2.8));
+        float width = max(.025, (.84 - height) * .49);
+        float flame = 1. - smoothstep(width * .35, width, abs(uv.x + wobble) + turbulence * .095);
+        flame *= smoothstep(.035, .16, height) * (1. - smoothstep(.65, .90, height));
+        float core = flame * (1. - smoothstep(.14, .52, height));
+        vec3 fire = mix(vec3(2.5, .48, .035), vec3(3., 1.9, .32), core);
+        float smoke = noise(vec2(uv.x * 5. - height, height * 8. - clock * .6));
+        smoke *= (1. - smoothstep(.1, .65, abs(uv.x - height * .16))) * smoothstep(.50, .75, height) *
+                 (1. - smoothstep(.82, 1., height)) * .16;
+        float ember = 0.;
+
+        for (int i = 0; i < 8; ++i)
+        {
+            float id = float(i);
+            float rise = fract(clock * (.22 + id * .011) + id * .137);
+            vec2 position = vec2(sin(rise * 8. + id) * .20 + rise * .15, .18 + rise * .80);
+            vec2 delta = (vec2(uv.x, height) - position) * vec2(1., .6);
+            ember += (1. - smoothstep(.004, .025, length(delta))) * (1. - rise);
+        }
+
+        float alpha = clamp(flame + smoke + ember, 0., 1.);
+        vec3 light = fire * flame + vec3(.45, .47, .40) * smoke + vec3(2.8, 1.2, .12) * ember;
+        c = vec4(light / max(alpha, .001), alpha) * tint;
+    }
+
     pixel = c;
 }
 )GLSL";
@@ -365,6 +395,7 @@ void Renderer::Resize(int w, int h)
 
     if (h < 1)
         h = 1;
+    windowHeight = h;
     float sx = w / Width, sy = h / Height, s = sx < sy ? sx : sy;
     viewportW = static_cast<int>(Width * s);
     viewportH = static_cast<int>(Height * s);
