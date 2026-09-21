@@ -164,39 +164,6 @@ void Tutorial::Ground(Renderer& r)
         }
 }
 
-void Tutorial::DrawShadows(Renderer& r)
-{
-    r.BeginShadows();
-
-    for (const Tree& t : trees)
-        if (Visible(t.pos, 240))
-        {
-            Point p = Project(t.pos);
-            r.SoftShadow(p, 13 * t.size, 7 * t.size, 70 * t.size, .8f);
-            r.SoftShadow({p.x + 32 * t.size, p.y + 10 * t.size}, 25 * t.size, 13 * t.size, 40 * t.size, .65f);
-        }
-
-    for (const House& h : houses)
-        if (Visible(h.pos, 230))
-        {
-            Point p = Project(h.pos);
-            r.SoftShadow(p, h.half * 39, h.half * 18, 80, .8f);
-            Point a = Project({h.pos.x - h.half, h.pos.y + h.half}),
-                  b = Project({h.pos.x + h.half, h.pos.y + h.half});
-            r.Quad(a, b, {b.x + 54, b.y + 20}, {a.x + 54, a.y + 20}, {0, 0, 0, .24f});
-        }
-
-    for (const Npc& n : npcs)
-        if (Visible(n.pos))
-            r.SoftShadow(Project(n.pos), 10, 5, 25, .9f);
-    r.SoftShadow(Project(player), 11, 5, 28, .95f);
-
-    for (const Animal& a : animals)
-        if (Visible(a.pos))
-            r.SoftShadow(Project(a.pos), 19, 6, 23, .8f);
-    r.EndShadows();
-}
-
 void Tutorial::DrawTree(Renderer& r, const Tree& tree)
 {
     if (!Visible(tree.pos))
@@ -246,7 +213,6 @@ void Tutorial::DrawFire(Renderer& r)
 
     Point p = Project(fire);
     r.Model(ModelKind::Camp, p);
-    r.Flame(p);
 }
 
 const char* Tutorial::AnimalName(int kind)
@@ -262,6 +228,10 @@ void Tutorial::UpdateAnimals(float dt)
 
     for (Animal& a : animals)
     {
+        if (!a.actor->IsActive())
+        {
+            continue;
+        }
         float distance = Distance(player, a.pos), homeDistance = Distance(a.pos, a.home);
         Vec direction = {std::cos(animation * .27f + a.seed), std::sin(animation * .21f + a.seed)};
         float speed = .4f;

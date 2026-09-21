@@ -163,6 +163,8 @@
     <ClInclude Include="PlayerProgress.h" />
     <ClInclude Include="LevelMap.h" />
     <ClInclude Include="LevelOne.h" />
+    <ClInclude Include="Actor.h" />
+    <ClInclude Include="SceneGraph.h" />
     <ClInclude Include="Renderer.h" />
     <ClInclude Include="Tutorial.h" />
     <ClInclude Include="stdafx.h" />
@@ -175,6 +177,10 @@
     <ClCompile Include="RendererModels.cpp" />
     <ClCompile Include="LevelOne.cpp" />
     <ClCompile Include="LevelOneRender.cpp" />
+    <ClCompile Include="Actor.cpp" />
+    <ClCompile Include="SceneGraph.cpp" />
+    <ClCompile Include="LevelOneScene.cpp" />
+    <ClCompile Include="TutorialScene.cpp" />
     <ClCompile Include="Renderer.cpp" />
     <ClCompile Include="Tutorial.cpp" />
     <ClCompile Include="TutorialWorld.cpp" />

@@ -405,6 +405,7 @@ void Renderer::Resize(int w, int h)
 
 void Renderer::Begin(float time, bool effects)
 {
+    drawCallCount = 0;
     vertices.clear();
     clock = time;
     postEnabled = effects;
@@ -438,6 +439,7 @@ void Renderer::Flush()
     glBindBuffer(GL_ARRAY_BUFFER, vbo);
     glBufferData(GL_ARRAY_BUFFER, vertices.size() * sizeof(Vertex), vertices.data(), GL_STREAM_DRAW);
     glDrawArrays(GL_TRIANGLES, 0, static_cast<GLsizei>(vertices.size()));
+    ++drawCallCount;
     vertices.clear();
 }
 
@@ -459,6 +461,7 @@ void Renderer::ScreenPass(GLuint target, int w, int h, int pass, GLuint texture,
     glActiveTexture(GL_TEXTURE0);
     glBindVertexArray(vao);
     glDrawArrays(GL_TRIANGLES, 0, 3);
+    ++drawCallCount;
 }
 
 void Renderer::BeginShadows()
@@ -506,6 +509,8 @@ void Renderer::End()
     Flush();
     glBindVertexArray(0);
     glUseProgram(0);
+
+    std::cout << "[프레임 " << ++frameCount << "] Draw 호출: " << drawCallCount << '\n';
 }
 
 void Renderer::Push(Point p, Color c, Point uv, Material m)

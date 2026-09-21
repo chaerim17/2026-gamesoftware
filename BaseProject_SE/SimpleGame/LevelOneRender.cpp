@@ -16,153 +16,8 @@ namespace
     }
 }
 
-void LevelOne::DrawWorld(Renderer& r)
+void LevelOne::DrawAttack(Renderer& r)
 {
-    struct DrawItem
-    {
-        float depth;
-        int type;
-        int index;
-    };
-
-    std::vector<DrawItem> items;
-
-    for (int i = 0; i < LevelMap::Count; ++i)
-    {
-        Point center = map.Center(i);
-
-        if (!Visible(center, 150))
-        {
-            continue;
-        }
-
-        LevelMap::Tile tile = map.At(i);
-        Point a = {center.x - .5f, center.y - .5f};
-        Point b = {center.x + .5f, center.y - .5f};
-        Point c = {center.x + .5f, center.y + .5f};
-        Point d = {center.x - .5f, center.y + .5f};
-        Material material = tile == LevelMap::Tile::Water  ? Material::Water
-                            : tile == LevelMap::Tile::Dirt ? Material::Dirt
-                                                           : Material::Grass;
-        Color color = tile == LevelMap::Tile::Water  ? Color(.14f, .36f, .37f)
-                      : tile == LevelMap::Tile::Dirt ? Color(.44f, .36f, .24f)
-                                                     : Color(.27f, .33f, .20f);
-        r.SurfaceQuad(Project(a), Project(b), Project(c), Project(d), a, b, c, d, material, color);
-
-        if (tile == LevelMap::Tile::Tree || tile == LevelMap::Tile::Rock)
-        {
-            items.push_back({center.x + center.y, tile == LevelMap::Tile::Tree ? 0 : 1, i});
-        }
-    }
-
-    r.BeginShadows();
-
-    for (const DrawItem& item : items)
-    {
-        Point p = Project(map.Center(item.index));
-        r.SoftShadow(p, item.type == 0 ? 18.f : 13.f, 7, item.type == 0 ? 45.f : 16.f, .65f);
-    }
-
-    for (const Enemy& enemy : enemies)
-    {
-        if (!enemy.dead && Visible(enemy.position))
-        {
-            r.SoftShadow(Project(enemy.position), 18, 6, 23, .8f);
-        }
-    }
-
-    r.SoftShadow(Project(player), 11, 5, 28, .95f);
-    r.EndShadows();
-
-    for (size_t i = 0; i < enemies.size(); ++i)
-    {
-        const Enemy& enemy = enemies[i];
-
-        if (!enemy.dead && Visible(enemy.position))
-        {
-            items.push_back({enemy.position.x + enemy.position.y, 2, static_cast<int>(i)});
-        }
-    }
-
-    for (size_t i = 0; i < loot.size(); ++i)
-    {
-        if (Visible(loot[i].position))
-        {
-            items.push_back({loot[i].position.x + loot[i].position.y, 3, static_cast<int>(i)});
-        }
-    }
-
-    items.push_back({player.x + player.y, 4, 0});
-    items.push_back({map.Camp().x + map.Camp().y, 5, 0});
-    std::stable_sort(items.begin(),
-        items.end(),
-        [](const DrawItem& a, const DrawItem& b)
-        {
-            return a.depth < b.depth;
-        });
-
-    for (const DrawItem& item : items)
-    {
-        if (item.type == 0 || item.type == 1)
-        {
-            Point center = map.Center(item.index);
-            Point p = Project(center);
-            Point hero = Project(player);
-            bool occludes =
-                item.type == 0 && hero.y < p.y && hero.y > p.y - 95 && std::fabs(hero.x - p.x) < 33;
-            r.Model(item.type == 0 ? ModelKind::Pine : ModelKind::Rock,
-                p,
-                item.type == 0 ? .68f : .8f,
-                occludes ? .30f : 1.f);
-        }
-        else if (item.type == 2)
-        {
-            const Enemy& enemy = enemies[item.index];
-            Point p = Project(enemy.position);
-            r.Model(enemy.kind ? ModelKind::Wolf : ModelKind::Boar,
-                p,
-                .9f,
-                1,
-                enemy.gait,
-                enemy.facing,
-                enemy.flash > 0 ? .65f : 0);
-
-            if (Distance(player, enemy.position) < 7 || enemy.flash > 0)
-            {
-                Bar(r,
-                    p.x - 21,
-                    p.y - 52,
-                    42,
-                    4,
-                    enemy.health / (enemy.kind ? 56.f : 42.f),
-                    {.75f, .24f, .17f});
-            }
-        }
-        else if (item.type == 3)
-        {
-            Point p = Project(loot[item.index].position);
-            r.Model(ModelKind::Supply, p, .7f);
-            r.Ellipse(p.x,
-                p.y + 2,
-                11,
-                5,
-                loot[item.index].kind == 0 ? Color(.40f, .80f, .40f, .35f) : Color(.92f, .68f, .29f, .35f));
-        }
-        else if (item.type == 4)
-        {
-            if (immunity == 0 || static_cast<int>(clock * 18) % 2 == 0 || health == 0)
-            {
-                r.Character(Project(player), 0, facing, moving ? static_cast<int>(steps) % 8 : 0);
-            }
-        }
-        else
-        {
-            Point p = Project(map.Camp());
-            r.Model(ModelKind::Camp, p);
-            r.Flame(p);
-        }
-    }
-
     if (attackAge < .32f && health > 0)
     {
         float direction = std::atan2(attackAim.y, attackAim.x);
@@ -203,14 +58,14 @@ void LevelOne::DrawMap(Renderer& r)
 
     for (const Enemy& enemy : enemies)
     {
-        if (!enemy.dead)
+        if (!enemy.dead && enemy.actor->IsActive() && enemy.actor->IsVisible())
         {
             Point p = position(enemy.position);
             r.Ellipse(p.x, p.y, 2, 2, {.88f, .34f, .23f}, 6);
         }
     }
 
-    Point camp = position(map.Camp());
+    Point camp = position(campPosition);
     Point hero = position(player);
     r.Ellipse(camp.x, camp.y, 4, 4, Gold, 8);
     r.Ellipse(hero.x, hero.y, 3, 3, Cream, 8);
@@ -274,11 +129,11 @@ void LevelOne::DrawHud(Renderer& r)
 
     for (const Loot& item : loot)
     {
-        nearLoot =
-            nearLoot || (Distance(player, item.position) <= 1.6f && map.ClearLine(player, item.position));
+        nearLoot = nearLoot || (item.actor->IsActive() && Distance(player, item.position) <= 1.6f &&
+                                   map.ClearLine(player, item.position));
     }
 
-    if (panel == Panel::None && health > 0 && (nearLoot || Distance(player, map.Camp()) < 2))
+    if (panel == Panel::None && health > 0 && (nearLoot || Distance(player, campPosition) < 2))
     {
         std::string prompt = nearLoot      ? "[E] 아이템 획득"
                              : GoalReady() ? "[E] 첫 레벨 완료"
@@ -286,14 +141,6 @@ void LevelOne::DrawHud(Renderer& r)
         float width = r.TextWidth(prompt, 1.6f) + 32;
         r.Rect(640 - width * .5f, 650, width, 40, Ink);
         r.Text(656 - width * .5f, 655, prompt, Gold, 1.6f);
-    }
-
-    for (const Popup& popup : popups)
-    {
-        Point p = Project(popup.position, 55 + (1.3f - popup.life) * 26);
-        Color color = popup.color;
-        color.a = std::min(1.f, popup.life * 2);
-        r.Text(p.x - r.TextWidth(popup.text, 1.3f) * .5f, p.y, popup.text, color, 1.3f);
     }
 
     if (saveFailed)
@@ -392,9 +239,6 @@ void LevelOne::DrawPanels(Renderer& r)
 void LevelOne::Render(Renderer& r)
 {
     r.Begin(clock, effects);
-    DrawWorld(r);
-    r.FinishWorld();
-    DrawHud(r);
-    DrawPanels(r);
+    scene.Render(r);
     r.End();
 }

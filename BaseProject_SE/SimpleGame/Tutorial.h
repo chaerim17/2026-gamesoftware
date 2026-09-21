@@ -1,5 +1,6 @@
 ﻿#pragma once
 #include "Renderer.h"
+#include "SceneGraph.h"
 #include <array>
 #include <vector>
 #include <string>
@@ -20,10 +21,7 @@ class Tutorial
     }
 
   private:
-    struct Vec
-    {
-        float x, y;
-    };
+    using Vec = Point;
 
     struct Npc
     {
@@ -34,18 +32,21 @@ class Tutorial
         float gait = 0;
         int direction = 0;
         bool walking = false;
+        Actor* actor = nullptr;
     };
 
     struct House
     {
         Vec pos;
         float half;
+        Actor* actor = nullptr;
     };
 
     struct Tree
     {
         Vec pos;
         float size;
+        Actor* actor = nullptr;
     };
 
     struct Animal
@@ -54,13 +55,9 @@ class Tutorial
         int kind;
         float gait, seed;
         int facing;
+        Actor* actor = nullptr;
     };
 
-    struct DrawItem
-    {
-        float depth;
-        int type, index;
-    };
     enum class Quest
     {
         Elder,
@@ -81,7 +78,7 @@ class Tutorial
     void Interact();
     void Speak(const std::string& name, const std::vector<std::string>& pages);
     void Ground(Renderer& r);
-    void DrawShadows(Renderer& r);
+    void BuildScene();
     void UpdateAnimals(float dt);
     void DrawAnimal(Renderer& r, const Animal& a);
     static const char* AnimalName(int kind);
@@ -96,8 +93,10 @@ class Tutorial
     void DrawMarker(Renderer& r, Vec p);
     void Hud(Renderer& r);
     void MiniMap(Renderer& r);
+    SceneGraph scene;
+    Actor* playerActor = nullptr;
     Vec player = {0, 3}, camera = {0, 3};
-    const Vec clue = {5, -7}, gate = {-2, -15}, fire = {0, 0}, lake = {14, -4};
+    Vec clue = {5, -7}, gate = {-2, -15}, fire = {0, 0}, lake = {14, -4};
     std::vector<Npc> npcs;
     std::vector<House> houses;
     std::vector<Tree> trees;

@@ -1,5 +1,7 @@
 ﻿#pragma once
 #include "LevelMap.h"
+#include "SceneGraph.h"
+#include <list>
 #include "PlayerProgress.h"
 #include <array>
 #include <random>
@@ -31,6 +33,7 @@ class LevelOne
         float gait = 0;
         int facing = 1;
         bool dead = false;
+        Actor* actor = nullptr;
     };
 
     struct Loot
@@ -38,6 +41,7 @@ class LevelOne
         Point position;
         int kind = 0;
         int quantity = 1;
+        Actor* actor = nullptr;
     };
 
     struct Popup
@@ -46,6 +50,7 @@ class LevelOne
         std::string text;
         Color color;
         float life = 1.3f;
+        Actor* actor = nullptr;
     };
 
     enum class Panel
@@ -75,17 +80,27 @@ class LevelOne
     bool GoalReady() const;
     static float Distance(Point a, Point b);
     static Point Normalize(Point value);
-    void DrawWorld(Renderer& renderer);
+    void BuildScene();
+    void AddLoot(Point position, int kind, int quantity);
+    void RegisterLoot(Loot& item);
+    void RegisterPopup(Popup& popup);
+    void DrawAttack(Renderer& renderer);
     void DrawHud(Renderer& renderer);
     void DrawMap(Renderer& renderer);
     void DrawPanels(Renderer& renderer);
 
+    SceneGraph scene;
+    Actor* playerActor = nullptr;
+    Actor* lootRoot = nullptr;
+    Actor* popupRoot = nullptr;
+    uint64_t nextActor = 0;
+    Point campPosition = {};
     LevelMap map;
     PlayerProgress progress;
     Point player = {}, camera = {}, aim = {1, 1}, attackAim = {1, 1};
     std::vector<Enemy> enemies;
-    std::vector<Loot> loot;
-    std::vector<Popup> popups;
+    std::list<Loot> loot;
+    std::list<Popup> popups;
     std::array<int, LevelMap::Count> flow{};
     std::array<bool, 256> keys{};
     std::mt19937 random;

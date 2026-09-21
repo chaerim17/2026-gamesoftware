@@ -124,6 +124,8 @@ class Renderer
     int windowHeight = 800;
     int viewportX = 0, viewportY = 0, viewportW = 1280, viewportH = 800;
     bool initialized = false, worldFinished = false, postEnabled = true;
+    unsigned int drawCallCount = 0;
+    unsigned long long frameCount = 0;
     std::vector<Vertex> vertices;
     std::array<std::vector<Vertex>, static_cast<size_t>(ModelKind::Count)> models;
 };

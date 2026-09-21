@@ -32,6 +32,7 @@ Tutorial::Tutorial()
 
 void Tutorial::Reset()
 {
+    scene.Clear();
     player = {0, 3};
     camera = player;
     quest = Quest::Elder;
@@ -182,6 +183,7 @@ void Tutorial::Reset()
 
             trees.push_back({p, .8f + (h % 5) * .12f});
         }
+    BuildScene();
 }
 
 float Tutorial::Distance(Vec a, Vec b)
@@ -217,11 +219,12 @@ bool Tutorial::Walkable(Vec p) const
         return false;
 
     for (const House& h : houses)
-        if (std::fabs(p.x - h.pos.x) < h.half + .24f && std::fabs(p.y - h.pos.y) < h.half + .24f)
+        if ((!h.actor || h.actor->IsActive()) && std::fabs(p.x - h.pos.x) < h.half + .24f &&
+            std::fabs(p.y - h.pos.y) < h.half + .24f)
             return false;
 
     for (const Tree& t : trees)
-        if (Distance(p, t.pos) < .45f)
+        if ((!t.actor || t.actor->IsActive()) && Distance(p, t.pos) < .45f)
             return false;
 
     if (Distance(p, fire) < .75f)
@@ -296,6 +299,10 @@ int Tutorial::Nearest() const
 
     for (size_t i = 0; i < npcs.size(); ++i)
     {
+        if (!npcs[i].actor->IsActive())
+        {
+            continue;
+        }
         float d = Distance(player, npcs[i].pos);
 
         if (d < best)
@@ -320,6 +327,10 @@ int Tutorial::Nearest() const
 
         for (size_t i = 0; i < animals.size(); ++i)
         {
+            if (!animals[i].actor->IsActive())
+            {
+                continue;
+            }
             float d = Distance(player, animals[i].pos);
 
             if (d < range)
@@ -495,10 +506,11 @@ void Tutorial::Update(float dt)
 
     elapsed += dt > 0 ? dt : 0;
     dt = Clamp(dt, 0, .05f);
+    scene.Update(dt);
     animation += dt;
     moving = false;
 
-    if (dialogue.empty())
+    if (dialogue.empty() && playerActor->IsActive())
     {
         float sx = (keys['d'] ? 1.f : 0.f) - (keys['a'] ? 1.f : 0.f);
         float sy = (keys['s'] ? 1.f : 0.f) - (keys['w'] ? 1.f : 0.f);
@@ -539,6 +551,11 @@ void Tutorial::Update(float dt)
     {
         Npc& n = npcs[i];
         n.walking = false;
+
+        if (!n.actor->IsActive())
+        {
+            continue;
+        }
 
         if (!dialogue.empty())
             continue;
@@ -604,24 +621,40 @@ void Tutorial::MiniMap(Renderer& r)
 
     for (const Tree& t : trees)
     {
+        if (!t.actor->IsActive() || !t.actor->IsVisible())
+        {
+            continue;
+        }
         Point p = pos(t.pos);
         r.Rect(p.x, p.y, 1.4f, 1.4f, {.27f, .41f, .32f});
     }
 
     for (const House& h : houses)
     {
+        if (!h.actor->IsActive() || !h.actor->IsVisible())
+        {
+            continue;
+        }
         Point p = pos(h.pos);
         r.Rect(p.x - 2, p.y - 2, 4, 4, {.67f, .47f, .29f});
     }
 
     for (const Npc& n : npcs)
     {
+        if (!n.actor->IsActive() || !n.actor->IsVisible())
+        {
+            continue;
+        }
         Point p = pos(n.pos);
         r.Ellipse(p.x, p.y, 1.5f, 1.5f, {.63f, .75f, .64f}, 6);
     }
 
     for (const Animal& a : animals)
     {
+        if (!a.actor->IsActive() || !a.actor->IsVisible())
+        {
+            continue;
+        }
         Point p = pos(a.pos);
         r.Rect(p.x, p.y, 2, 2, {.66f, .39f, .25f});
     }
@@ -739,112 +772,6 @@ void Tutorial::Hud(Renderer& r)
 void Tutorial::Render(Renderer& r)
 {
     r.Begin(animation, postEffects);
-    Ground(r);
-    DrawShadows(r);
-    std::vector<DrawItem> items;
-    items.reserve(trees.size() + houses.size() + npcs.size() + animals.size() + 4);
-
-    for (size_t i = 0; i < trees.size(); ++i)
-        items.push_back({trees[i].pos.x + trees[i].pos.y, 0, static_cast<int>(i)});
-
-    for (size_t i = 0; i < houses.size(); ++i)
-        items.push_back({houses[i].pos.x + houses[i].pos.y, 1, static_cast<int>(i)});
-
-    for (size_t i = 0; i < npcs.size(); ++i)
-        items.push_back({npcs[i].pos.x + npcs[i].pos.y, 2, static_cast<int>(i)});
-
-    for (size_t i = 0; i < animals.size(); ++i)
-        items.push_back({animals[i].pos.x + animals[i].pos.y, 7, static_cast<int>(i)});
-    items.push_back({player.x + player.y, 3, 0});
-    items.push_back({0, 4, 0});
-    items.push_back({clue.x + clue.y, 5, 0});
-    items.push_back({gate.x + gate.y, 6, 0});
-    std::stable_sort(items.begin(),
-        items.end(),
-        [](const DrawItem& a, const DrawItem& b)
-        {
-            return a.depth < b.depth;
-        });
-
-    for (const DrawItem& item : items)
-    {
-        switch (item.type)
-        {
-            case 0:
-                DrawTree(r, trees[item.index]);
-                break;
-
-            case 1:
-                DrawHouse(r, houses[item.index]);
-                break;
-
-            case 2:
-                DrawPerson(r,
-                    npcs[item.index].pos,
-                    npcs[item.index].color,
-                    false,
-                    animation * 1.5f + item.index,
-                    item.index);
-                break;
-
-            case 3:
-                DrawPerson(r, player, {.30f, .36f, .36f}, true, animation * 2);
-                break;
-
-            case 4:
-                DrawFire(r);
-                break;
-
-            case 7:
-                DrawAnimal(r, animals[item.index]);
-                break;
-
-            case 5:
-            {
-                Point p = Project(clue);
-                r.Line({p.x - 20, p.y - 6}, {p.x + 16, p.y + 4}, 6, {.32f, .25f, .16f});
-                r.Line({p.x - 15, p.y + 3}, {p.x + 19, p.y - 3}, 5, {.40f, .29f, .18f});
-                r.Ellipse(p.x - 14, p.y + 1, 9, 9, {.23f, .22f, .17f}, 10);
-                r.Ellipse(p.x - 14, p.y + 1, 5, 5, {.46f, .40f, .28f}, 10);
-                r.Quad({p.x - 4, p.y - 6},
-                    {p.x + 10, p.y - 4},
-                    {p.x + 6, p.y + 3},
-                    {p.x - 5, p.y + 1},
-                    {.75f, .29f, .19f});
-
-                for (int i = 0; i < 4; ++i)
-                {
-                    Point t = Project({clue.x - .8f - i * .25f, clue.y - .5f - i * .32f});
-                    r.Ellipse(t.x, t.y, 3, 1.5f, {.27f, .27f, .20f});
-                }
-
-                break;
-            }
-
-            case 6:
-            {
-                Point p = Project(gate);
-                r.Line({p.x - 39, p.y + 8}, {p.x - 39, p.y - 60}, 8, {.31f, .25f, .18f});
-                r.Line({p.x + 39, p.y - 8}, {p.x + 39, p.y - 76}, 8, {.40f, .31f, .20f});
-                r.Line({p.x - 43, p.y - 60}, {p.x + 43, p.y - 77}, 7, {.44f, .33f, .20f});
-                r.Triangle(
-                    {p.x + 39, p.y - 72}, {p.x + 63, p.y - 67}, {p.x + 39, p.y - 53}, {.66f, .27f, .18f});
-                break;
-            }
-        }
-    }
-
-    if (quest != Quest::Complete)
-        DrawMarker(r, Target());
-    // Drifting pollen is part of the world pass; UI stays outside post-processing.
-    for (int i = 0; i < 36; ++i)
-    {
-        float x = std::fmod(i * 137.f + animation * (5 + i % 4), 1320.f) - 20;
-        float y = std::fmod(i * 83.f + std::sin(animation * .4f + i) * 10, 800.f);
-        r.Ellipse(x, y, 1.5f, 1.5f, {.89f, .78f, .44f, .18f}, 6);
-    }
-
-    r.FinishWorld();
-    Hud(r);
+    scene.Render(r);
     r.End();
 }

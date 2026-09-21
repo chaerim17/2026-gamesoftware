@@ -47,10 +47,12 @@ void LevelOne::ShowPopup(Point p, const std::string& text, Color color)
 {
     if (popups.size() >= 24)
     {
-        popups.erase(popups.begin());
+        scene.Destroy(popups.front().actor);
+        popups.pop_front();
     }
 
     popups.push_back({p, text, color, 1.3f});
+    RegisterPopup(popups.back());
 }
 
 float LevelOne::Distance(Point a, Point b)
@@ -88,10 +90,13 @@ bool LevelOne::Visible(Point p, float margin) const
 
 void LevelOne::NewMap()
 {
+    scene.Clear();
+    lootRoot = popupRoot = nullptr;
     seed = FreshSeed();
     random.seed(seed);
     map.Generate(seed);
-    player = map.Camp();
+    campPosition = map.Camp();
+    player = campPosition;
     player.y += 2;
     camera = player;
     health = progress.MaxHealth();
@@ -112,7 +117,7 @@ void LevelOne::NewMap()
     {
         Point position = map.Center(cell);
 
-        if (Distance(position, map.Camp()) < 7 || !map.CanOccupy(position))
+        if (Distance(position, campPosition) < 7 || !map.CanOccupy(position))
         {
             continue;
         }
@@ -141,8 +146,9 @@ void LevelOne::NewMap()
         }
     }
 
-    loot.push_back({{map.Camp().x + 2, map.Camp().y}, 0, 2});
-    loot.push_back({{map.Camp().x - 2, map.Camp().y}, 1, 1});
+    loot.push_back({{campPosition.x + 2, campPosition.y}, 0, 2});
+    loot.push_back({{campPosition.x - 2, campPosition.y}, 1, 1});
+    BuildScene();
     Notice("새 사냥터에 도착했습니다. 캠프의 보급품을 E로 챙길 수 있습니다.");
 }
 
@@ -279,7 +285,7 @@ void LevelOne::AttackAt(Point canvas)
 
 void LevelOne::StartAttack()
 {
-    if (health <= 0 || panel != Panel::None || attackCooldown > 0)
+    if (!playerActor->IsActive() || health <= 0 || panel != Panel::None || attackCooldown > 0)
     {
         return;
     }
@@ -306,7 +312,7 @@ void LevelOne::Defeat(Enemy& enemy)
     progress.kills = std::min(999999, progress.kills + 1);
 
     // Bound uncollected drops without discarding items: respawn waits for pickup when full.
-    loot.push_back({enemy.position, random() % 3 == 0 ? 0 : 1, 1});
+    AddLoot(enemy.position, random() % 3 == 0 ? 0 : 1, 1);
     ShowPopup(enemy.position, "+" + std::to_string(amount) + " 경험치", {.95f, .75f, .32f});
 
     if (gainedLevels > 0)
@@ -324,6 +330,11 @@ void LevelOne::ResolveAttack()
 
     for (Enemy& enemy : enemies)
     {
+        if (!enemy.actor->IsActive())
+        {
+            continue;
+        }
+
         float distance = Distance(player, enemy.position);
 
         if (enemy.dead || distance > 2.2f || !map.ClearLine(player, enemy.position))
@@ -352,10 +363,15 @@ void LevelOne::ResolveAttack()
 
 void LevelOne::UpdateEnemies(float dt)
 {
-    bool campSafe = Distance(player, map.Camp()) < 4;
+    bool campSafe = Distance(player, campPosition) < 4;
 
     for (Enemy& enemy : enemies)
     {
+        if (!enemy.actor->IsActive())
+        {
+            continue;
+        }
+
         enemy.flash = std::max(0.f, enemy.flash - dt);
         enemy.cooldown = std::max(0.f, enemy.cooldown - dt);
 
@@ -440,11 +456,16 @@ bool LevelOne::GoalReady() const
 
 void LevelOne::Interact()
 {
+    if (!playerActor->IsActive())
+    {
+        return;
+    }
     bool collected = false;
 
     for (auto item = loot.begin(); item != loot.end();)
     {
-        if (Distance(player, item->position) > 1.6f || !map.ClearLine(player, item->position))
+        if (!item->actor->IsActive() || Distance(player, item->position) > 1.6f ||
+            !map.ClearLine(player, item->position))
         {
             ++item;
             continue;
@@ -468,6 +489,7 @@ void LevelOne::Interact()
 
         if (item->quantity == 0)
         {
+            scene.Destroy(item->actor);
             item = loot.erase(item);
         }
         else
@@ -482,7 +504,7 @@ void LevelOne::Interact()
         return;
     }
 
-    if (Distance(player, map.Camp()) < 2)
+    if (Distance(player, campPosition) < 2)
     {
         health = progress.MaxHealth();
         Save();
@@ -517,7 +539,7 @@ void LevelOne::Heal()
 
 void LevelOne::Respawn()
 {
-    player = map.Camp();
+    player = campPosition;
     player.y += 2;
     camera = player;
     health = progress.MaxHealth();
@@ -533,12 +555,13 @@ void LevelOne::Respawn()
 
 void LevelOne::Update(float dt)
 {
-    if (panel != Panel::None || health <= 0)
+    if (panel != Panel::None || health <= 0 || !playerActor->IsActive())
     {
         return;
     }
 
     dt = std::max(0.f, std::min(dt, .05f));
+    scene.Update(dt);
     clock += dt;
     noticeTimer = std::max(0.f, noticeTimer - dt);
     immunity = std::max(0.f, immunity - dt);
@@ -602,11 +625,16 @@ void LevelOne::Update(float dt)
         popup.life -= dt;
     }
 
-    popups.erase(std::remove_if(popups.begin(),
-                     popups.end(),
-                     [](const Popup& popup)
-                     {
-                         return popup.life <= 0;
-                     }),
-        popups.end());
+    for (auto it = popups.begin(); it != popups.end();)
+    {
+        if (it->life <= 0)
+        {
+            scene.Destroy(it->actor);
+            it = popups.erase(it);
+        }
+        else
+        {
+            ++it;
+        }
+    }
 }
