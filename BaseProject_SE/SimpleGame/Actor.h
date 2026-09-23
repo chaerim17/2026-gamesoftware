@@ -1,6 +1,7 @@
 ﻿#pragma once
 #include "Renderer.h"
 #include <functional>
+#include <cstdint>
 #include <string>
 #include <vector>
 
@@ -48,6 +49,11 @@ class Actor
   private:
     friend class SceneGraph;
     void Synchronize();
+    void RefreshState();
+    SceneGraph* scene = nullptr;
+    uint64_t serial = 0;
+    bool spatial = false;
+    bool effectiveActive = true, effectiveVisible = true;
     std::string name;
     Point position = {}, previous = {};
     Point* binding = nullptr;

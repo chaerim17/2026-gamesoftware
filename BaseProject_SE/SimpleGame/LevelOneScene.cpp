@@ -16,6 +16,7 @@ void LevelOne::BuildScene()
     {
         Actor& ground = scene.Create("tile-" + std::to_string(i), &terrain);
         ground.SetPosition(map.Center(i));
+        scene.SetSpatial(ground);
         ground.layer = ActorLayer::Ground;
         ground.renderCondition = [this, i]()
         {
@@ -43,6 +44,7 @@ void LevelOne::BuildScene()
         bool tree = tile == LevelMap::Tile::Tree;
         Actor& object = scene.Create("scenery-" + std::to_string(i), &scenery);
         object.SetPosition(map.Center(i));
+        scene.SetSpatial(object);
         object.renderCondition = ground.renderCondition;
         object.shadow = [this, tree](Renderer& r, const Actor& actor)
         {

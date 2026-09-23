@@ -3,6 +3,7 @@
 #define NOMINMAX
 #endif
 #include "GameStorage.h"
+#include "Profiler.h"
 #include <windows.h>
 #include <cstring>
 #include <iostream>
@@ -64,6 +65,7 @@ std::wstring GameStorage::Directory()
 
 bool GameStorage::Read(const wchar_t* name, uint32_t version, size_t limit, std::vector<unsigned char>& data)
 {
+    Profile::Scope scope("storage_read_validate");
     data.clear();
     std::wstring directory = Directory();
 
@@ -113,6 +115,7 @@ bool GameStorage::Read(const wchar_t* name, uint32_t version, size_t limit, std:
 
 bool GameStorage::Write(const wchar_t* name, uint32_t version, const std::vector<unsigned char>& data)
 {
+    Profile::Scope scope("storage_write_flush");
     std::wstring directory = Directory();
 
     if (directory.empty() || data.size() > 32 * 1024 * 1024)
@@ -159,5 +162,10 @@ bool GameStorage::Write(const wchar_t* name, uint32_t version, const std::vector
         std::wcerr << L"파일 저장 실패: " << target << L'\n';
     }
 
+    Profile::Count(success ? "storage_write_success" : "storage_write_failure");
+    if (success)
+    {
+        Profile::Count("storage_write_bytes", static_cast<double>(data.size()));
+    }
     return success;
 }

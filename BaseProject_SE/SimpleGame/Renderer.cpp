@@ -1,16 +1,22 @@
 ﻿#include "stdafx.h"
 #include "Renderer.h"
+#include "Profiler.h"
 #include <cmath>
 #include <cstddef>
 #include <iostream>
+#include <iomanip>
+#include <sstream>
+#include <algorithm>
 
 namespace
 {
     const char* GeometryVS = R"GLSL(#version 330 core
-layout(location = 0) in vec2 position;
-layout(location = 1) in vec4 color;
-layout(location = 2) in vec2 texcoord;
-layout(location = 3) in float material;
+layout(location = 0) in vec4 positions01;
+layout(location = 1) in vec4 positions23;
+layout(location = 2) in vec4 uvs01;
+layout(location = 3) in vec4 uvs23;
+layout(location = 4) in vec4 color;
+layout(location = 5) in float material;
 uniform vec2 canvas;
 out vec4 tint;
 out vec2 uv;
@@ -18,9 +24,15 @@ flat out int kind;
 
 void main()
 {
+    // One shared quad topology, with all primitive data advancing per instance.
+    const int corners[6] = int[6](0, 1, 2, 0, 2, 3);
+    int corner = corners[gl_VertexID];
+    vec2 positions[4] = vec2[4](positions01.xy, positions01.zw, positions23.xy, positions23.zw);
+    vec2 texcoords[4] = vec2[4](uvs01.xy, uvs01.zw, uvs23.xy, uvs23.zw);
+    vec2 position = positions[corner];
     gl_Position = vec4(position.x / canvas.x * 2. - 1., 1. - position.y / canvas.y * 2., 0, 1);
     tint = color;
-    uv = texcoord;
+    uv = texcoords[corner];
     kind = int(material + .5);
 }
 )GLSL";
@@ -32,6 +44,7 @@ flat in int kind;
 uniform float clock;
 uniform sampler2D spriteAtlas;
 uniform sampler2D fontAtlas;
+uniform sampler2D modelAtlas;
 out vec4 pixel;
 
 float hash(vec2 p)
@@ -142,6 +155,13 @@ void main()
         c = vec4(light / max(alpha, .001), alpha) * tint;
     }
 
+    if (kind == 11)
+    {
+        vec4 model = texture(modelAtlas, uv);
+        vec3 rgb = model.a > .001 ? model.rgb / model.a : vec3(0);
+        c = vec4(mix(rgb, vec3(1), tint.r), model.a * tint.a);
+    }
+
     pixel = c;
 }
 )GLSL";
@@ -195,9 +215,12 @@ void main()
         vec2 d = 1. / vec2(textureSize(source, 0));
         float mask = 0.;
 
-        for (int x = -2; x <= 2; ++x)
-            for (int y = -2; y <= 2; ++y)
-                mask += texture(source, uv + vec2(x, y) * d).a / 25.;
+        // Bilinear paired taps approximate the same five-texel box footprint with nine fetches.
+        const float offsets[3] = float[3](-1.5, .5, 2.);
+        const float weights[3] = float[3](.4, .4, .2);
+        for (int x = 0; x < 3; ++x)
+            for (int y = 0; y < 3; ++y)
+                mask += texture(source, uv + vec2(offsets[x], offsets[y]) * d).a * weights[x] * weights[y];
         pixel = vec4(.055, .085, .085, mask * .78);
     }
     else
@@ -229,6 +252,7 @@ void main()
 
 GLuint Renderer::Program(const char* vs, const char* fs)
 {
+    Profile::Scope scope("shader_compile_link");
     GLuint shaders[2] = {};
     const char* src[2] = {vs, fs};
     GLenum types[2] = {GL_VERTEX_SHADER, GL_FRAGMENT_SHADER};
@@ -318,6 +342,7 @@ bool Renderer::Target(GLuint& fbo, GLuint& texture, int w, int h, GLint format)
 
 Renderer::Renderer(int w, int h)
 {
+    Profile::Scope startup("renderer_initialize");
     program = Program(GeometryVS, GeometryFS);
     post = Program(ScreenVS, ScreenFS);
 
@@ -329,6 +354,7 @@ Renderer::Renderer(int w, int h)
     glUseProgram(program);
     glUniform1i(glGetUniformLocation(program, "spriteAtlas"), 1);
     glUniform1i(glGetUniformLocation(program, "fontAtlas"), 2);
+    glUniform1i(glGetUniformLocation(program, "modelAtlas"), 3);
     glUseProgram(post);
     glUniform1i(glGetUniformLocation(post, "source"), 0);
     glUniform1i(glGetUniformLocation(post, "extra"), 1);
@@ -338,16 +364,20 @@ Renderer::Renderer(int w, int h)
     glGenBuffers(1, &vbo);
     glBindVertexArray(vao);
     glBindBuffer(GL_ARRAY_BUFFER, vbo);
-    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, sizeof(Vertex), nullptr);
-    glVertexAttribPointer(
-        1, 4, GL_FLOAT, GL_FALSE, sizeof(Vertex), reinterpret_cast<void*>(offsetof(Vertex, r)));
-    glVertexAttribPointer(
-        2, 2, GL_FLOAT, GL_FALSE, sizeof(Vertex), reinterpret_cast<void*>(offsetof(Vertex, u)));
-    glVertexAttribPointer(
-        3, 1, GL_FLOAT, GL_FALSE, sizeof(Vertex), reinterpret_cast<void*>(offsetof(Vertex, kind)));
-
-    for (int i = 0; i < 4; ++i)
+    static_assert(sizeof(Instance) == 21 * sizeof(float), "Instance layout changed.");
+    const int widths[6] = {4, 4, 4, 4, 4, 1};
+    const size_t offsets[6] = {0, 4, 8, 12, 16, 20};
+    for (GLuint i = 0; i < 6; ++i)
+    {
+        glVertexAttribPointer(i,
+            widths[i],
+            GL_FLOAT,
+            GL_FALSE,
+            sizeof(Instance),
+            reinterpret_cast<void*>(offsets[i] * sizeof(float)));
         glEnableVertexAttribArray(i);
+        glVertexAttribDivisor(i, 1);
+    }
 
     if (!Target(sceneFbo, sceneTex, 1280, 800, GL_RGBA16F) ||
         !Target(shadowFbo, shadowTex, 640, 400, GL_RGBA8))
@@ -357,18 +387,35 @@ Renderer::Renderer(int w, int h)
         if (!Target(bloomFbo[i], bloomTex[i], 640, 400, GL_RGBA16F))
             return;
 
-    vertices.reserve(180000);
+    vertices.reserve(10000);
+    instances.reserve(16000);
 
     if (!CreateAssets())
         return;
 
+    instanceBufferBytes = 0;
+    instances.clear();
+    instances.shrink_to_fit();
+    instances.reserve(16000);
     initialized = vao && vbo;
+    gpu.Initialize();
+    Profile::Gauge("estimated_texture_storage_bytes", 39002112);
+    Profile::Gauge("shadow_filter_texture_fetches_per_pixel", 9);
+    Profile::Gauge("render_width_px", 1280);
+    Profile::Gauge("render_height_px", 800);
+    Profile::Gauge("shadow_width_px", 640);
+    Profile::Gauge("shadow_height_px", 400);
     Resize(w, h);
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
 }
 
 Renderer::~Renderer()
 {
+    gpu.Release();
+    if (modelAtlas)
+    {
+        glDeleteTextures(1, &modelAtlas);
+    }
     ReleaseAssets();
     GLuint textures[] = {sceneTex, shadowTex, bloomTex[0], bloomTex[1]};
     glDeleteTextures(4, textures);
@@ -405,8 +452,10 @@ void Renderer::Resize(int w, int h)
 
 void Renderer::Begin(float time, bool effects)
 {
-    drawCallCount = 0;
-    vertices.clear();
+    instances.clear();
+    modelInstances = 0;
+    currentPass = "draw_ground";
+    gpu.BeginFrame();
     clock = time;
     postEnabled = effects;
     worldFinished = false;
@@ -424,9 +473,11 @@ void Renderer::Begin(float time, bool effects)
 
 void Renderer::Flush()
 {
-    if (vertices.empty())
+    if (instances.empty())
+    {
         return;
-
+    }
+    Profile::Scope scope("render_flush_cpu");
     glUseProgram(program);
     glUniform2f(canvasLocation, canvasW, canvasH);
     glUniform1f(timeLocation, clock);
@@ -434,17 +485,46 @@ void Renderer::Flush()
     glBindTexture(GL_TEXTURE_2D, sprites);
     glActiveTexture(GL_TEXTURE2);
     glBindTexture(GL_TEXTURE_2D, fontTex);
+    glActiveTexture(GL_TEXTURE3);
+    glBindTexture(GL_TEXTURE_2D, modelAtlas);
     glActiveTexture(GL_TEXTURE0);
     glBindVertexArray(vao);
     glBindBuffer(GL_ARRAY_BUFFER, vbo);
-    glBufferData(GL_ARRAY_BUFFER, vertices.size() * sizeof(Vertex), vertices.data(), GL_STREAM_DRAW);
-    glDrawArrays(GL_TRIANGLES, 0, static_cast<GLsizei>(vertices.size()));
-    ++drawCallCount;
-    vertices.clear();
+    size_t bytes = instances.size() * sizeof(Instance);
+    {
+        Profile::Scope upload("render_buffer_upload");
+        if (bytes > instanceBufferBytes)
+        {
+            instanceBufferBytes = std::max(bytes, instanceBufferBytes * 2);
+            Profile::Count("instance_buffer_capacity_growths");
+        }
+        // Orphan old storage instead of waiting for the previous GPU reader.
+        glBufferData(GL_ARRAY_BUFFER, instanceBufferBytes, nullptr, GL_STREAM_DRAW);
+        glBufferSubData(GL_ARRAY_BUFFER, 0, bytes, instances.data());
+    }
+    {
+        Profile::Scope submit("render_draw_submit");
+        GpuPass pass = std::string(currentPass) == "draw_ground"        ? GpuPass::Ground
+                       : std::string(currentPass) == "draw_shadow_mask" ? GpuPass::Shadows
+                       : std::string(currentPass) == "draw_ui"          ? GpuPass::UI
+                                                                        : GpuPass::World;
+        gpu.Begin(pass);
+        glDrawArraysInstanced(GL_TRIANGLES, 0, 6, static_cast<GLsizei>(instances.size()));
+        gpu.End(pass);
+    }
+    Profile::Count("draw_calls");
+    Profile::Count(currentPass);
+    Profile::Count("instanced_draw_calls");
+    Profile::Count("primitive_instances", static_cast<double>(instances.size()));
+    Profile::Count("submitted_vertices", static_cast<double>(instances.size() * 6));
+    Profile::Count("vertex_upload_bytes", static_cast<double>(bytes));
+    Profile::Gauge("instance_buffer_capacity_bytes", static_cast<double>(instanceBufferBytes));
+    instances.clear();
 }
 
 void Renderer::ScreenPass(GLuint target, int w, int h, int pass, GLuint texture, GLuint extra)
 {
+    Profile::Scope scope("render_screen_pass_cpu");
     glBindFramebuffer(GL_FRAMEBUFFER, target);
 
     if (target)
@@ -460,13 +540,29 @@ void Renderer::ScreenPass(GLuint target, int w, int h, int pass, GLuint texture,
     glBindTexture(GL_TEXTURE_2D, extra);
     glActiveTexture(GL_TEXTURE0);
     glBindVertexArray(vao);
+    GpuPass gpuPass = pass == 0   ? GpuPass::BloomExtract
+                      : pass == 1 ? GpuPass::BloomHorizontal
+                      : pass == 2 ? GpuPass::BloomVertical
+                      : pass == 4 ? GpuPass::ShadowComposite
+                                  : GpuPass::Composite;
+    const char* name = pass == 0   ? "draw_bloom_extract"
+                       : pass == 1 ? "draw_bloom_horizontal"
+                       : pass == 2 ? "draw_bloom_vertical"
+                       : pass == 4 ? "draw_shadow_composite"
+                                   : "draw_composite";
+    gpu.Begin(gpuPass);
     glDrawArrays(GL_TRIANGLES, 0, 3);
-    ++drawCallCount;
+    gpu.End(gpuPass);
+    Profile::Count("draw_calls");
+    Profile::Count(name);
+    Profile::Count("fullscreen_passes");
+    Profile::Count("submitted_vertices", 3);
 }
 
 void Renderer::BeginShadows()
 {
     Flush();
+    currentPass = "draw_shadow_mask";
     glBindFramebuffer(GL_FRAMEBUFFER, shadowFbo);
     glViewport(0, 0, 640, 400);
     glClearColor(0, 0, 0, 0);
@@ -477,6 +573,7 @@ void Renderer::EndShadows()
 {
     Flush();
     ScreenPass(sceneFbo, 1280, 800, 4, shadowTex);
+    currentPass = "draw_world";
 }
 
 void Renderer::FinishWorld()
@@ -500,6 +597,7 @@ void Renderer::FinishWorld()
     ScreenPass(0, 1280, 800, 3, sceneTex, postEnabled ? bloomTex[0] : 0);
     glEnable(GL_BLEND);
     worldFinished = true;
+    currentPass = "draw_ui";
 }
 
 void Renderer::End()
@@ -509,8 +607,13 @@ void Renderer::End()
     Flush();
     glBindVertexArray(0);
     glUseProgram(0);
+    gpu.EndFrame();
+    Profile::Count("model_sprite_instances", modelInstances);
+}
 
-    std::cout << "[프레임 " << ++frameCount << "] Draw 호출: " << drawCallCount << '\n';
+void Renderer::LogFrame()
+{
+    Profile::EndFrame();
 }
 
 void Renderer::Push(Point p, Color c, Point uv, Material m)
@@ -520,29 +623,36 @@ void Renderer::Push(Point p, Color c, Point uv, Material m)
 
 void Renderer::Triangle(Point a, Point b, Point c, Color col)
 {
-    Push(a, col);
-    Push(b, col);
-    Push(c, col);
+    SurfaceTriangle(a, b, c, {0, 0}, {0, 0}, {0, 0}, Material::Solid, col);
 }
 
 void Renderer::Quad(Point a, Point b, Point c, Point d, Color col)
 {
-    Triangle(a, b, c, col);
-    Triangle(a, c, d, col);
+    SurfaceQuad(a, b, c, d, {0, 0}, {0, 0}, {0, 0}, {0, 0}, Material::Solid, col);
 }
 
 void Renderer::SurfaceTriangle(Point a, Point b, Point c, Point ua, Point ub, Point uc, Material m, Color col)
 {
-    Push(a, col, ua, m);
-    Push(b, col, ub, m);
-    Push(c, col, uc, m);
+    if (buildingModels)
+    {
+        Push(a, col, ua, m);
+        Push(b, col, ub, m);
+        Push(c, col, uc, m);
+        return;
+    }
+    instances.push_back({{a, b, c, c}, {ua, ub, uc, uc}, col, static_cast<float>(m)});
 }
 
 void Renderer::SurfaceQuad(
     Point a, Point b, Point c, Point d, Point ua, Point ub, Point uc, Point ud, Material m, Color col)
 {
-    SurfaceTriangle(a, b, c, ua, ub, uc, m, col);
-    SurfaceTriangle(a, c, d, ua, uc, ud, m, col);
+    if (buildingModels)
+    {
+        SurfaceTriangle(a, b, c, ua, ub, uc, m, col);
+        SurfaceTriangle(a, c, d, ua, uc, ud, m, col);
+        return;
+    }
+    instances.push_back({{a, b, c, d}, {ua, ub, uc, ud}, col, static_cast<float>(m)});
 }
 
 void Renderer::Rect(float x, float y, float w, float h, Color c)

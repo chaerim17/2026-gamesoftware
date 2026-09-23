@@ -1,5 +1,6 @@
 ﻿#include "stdafx.h"
 #include "LevelMap.h"
+#include "Profiler.h"
 #include <random>
 #include <queue>
 #include <cmath>
@@ -45,6 +46,7 @@ const std::vector<int>& LevelMap::OpenCells() const
 
 bool LevelMap::CanOccupy(Point p) const
 {
+    ++collisionQueries;
     // A 0.44-unit actor fits every one-cell-wide, four-connected corridor.
     for (float dx : {-.22f, .22f})
     {
@@ -62,6 +64,7 @@ bool LevelMap::CanOccupy(Point p) const
 
 bool LevelMap::ClearLine(Point from, Point to) const
 {
+    ++lineQueries;
     float dx = to.x - from.x;
     float dy = to.y - from.y;
     int steps = static_cast<int>(std::sqrt(dx * dx + dy * dy) * 10) + 1;
@@ -81,6 +84,8 @@ bool LevelMap::ClearLine(Point from, Point to) const
 
 std::array<int, LevelMap::Count> LevelMap::Distances(int start) const
 {
+    Profile::Scope scope("path_distance_field");
+    Profile::Count("path_field_builds");
     std::array<int, Count> result;
     result.fill(-1);
 
@@ -181,6 +186,7 @@ bool LevelMap::IsConnected() const
 
 void LevelMap::Generate(uint32_t seed)
 {
+    Profile::Scope scope("map_generate");
     std::mt19937 random(seed);
     cells.fill(Tile::Grass);
 
@@ -272,4 +278,11 @@ void LevelMap::Generate(uint32_t seed)
             openCells.push_back(i);
         }
     }
+}
+
+void LevelMap::ReportMetrics() const
+{
+    Profile::Count("collision_queries", static_cast<double>(collisionQueries));
+    Profile::Count("line_of_sight_queries", static_cast<double>(lineQueries));
+    collisionQueries = lineQueries = 0;
 }

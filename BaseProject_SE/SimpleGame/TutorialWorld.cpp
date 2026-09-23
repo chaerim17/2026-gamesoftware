@@ -1,5 +1,6 @@
 ﻿#include "stdafx.h"
 #include "Tutorial.h"
+#include "Profiler.h"
 #include <cmath>
 
 bool Tutorial::Visible(Vec p, float margin) const
@@ -222,6 +223,7 @@ const char* Tutorial::AnimalName(int kind)
 
 void Tutorial::UpdateAnimals(float dt)
 {
+    Profile::Scope scope("wildlife_ai_update");
     // Wildlife is observational in this tutorial: alert/flee behavior without combat locks.
     if (!dialogue.empty())
         return;

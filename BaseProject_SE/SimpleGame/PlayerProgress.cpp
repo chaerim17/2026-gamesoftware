@@ -110,7 +110,7 @@ bool PlayerProgress::Save() const
     std::vector<unsigned char> bytes(sizeof(values));
     std::memcpy(bytes.data(), values, sizeof(values));
 
-    return GameStorage::Write(L"progress.save", 1, bytes);
+    return GameStorage::QueueProgress(bytes);
 }
 
 bool PlayerProgress::Load()

@@ -1,5 +1,7 @@
 ﻿#include "stdafx.h"
 #include "SceneGraph.h"
+#include "Profiler.h"
+#include <cmath>
 #include <algorithm>
 #include <stdexcept>
 
@@ -35,12 +37,7 @@ void SceneGraph::CheckMutation() const
 
 bool SceneGraph::Contains(const Actor* actor) const
 {
-    return std::any_of(actors.begin(),
-        actors.end(),
-        [actor](const std::unique_ptr<Actor>& entry)
-        {
-            return entry.get() == actor;
-        });
+    return owned.find(actor) != owned.end();
 }
 
 Actor& SceneGraph::Create(const std::string& name, Actor* parent)
@@ -56,25 +53,25 @@ Actor& SceneGraph::Create(const std::string& name, Actor* parent)
     }
     actors.emplace_back(new Actor(name));
     Actor& actor = *actors.back();
+    actor.scene = this;
+    actor.serial = ++nextSerial;
+    names.emplace(name, &actor);
+    owned.insert(&actor);
+    membershipDirty = true;
     if (parent)
     {
         parent->Synchronize();
         actor.parent = parent;
         parent->children.push_back(&actor);
     }
+    actor.RefreshState();
     return actor;
 }
 
 Actor* SceneGraph::Find(const std::string& name) const
 {
-    for (const auto& actor : actors)
-    {
-        if (actor->Name() == name)
-        {
-            return actor.get();
-        }
-    }
-    return nullptr;
+    auto found = names.find(name);
+    return found == names.end() ? nullptr : found->second;
 }
 
 bool SceneGraph::Reparent(Actor& actor, Actor* parent)
@@ -102,6 +99,8 @@ bool SceneGraph::Reparent(Actor& actor, Actor* parent)
     {
         parent->children.push_back(&actor);
     }
+    actor.RefreshState();
+    membershipDirty = true;
     return true;
 }
 
@@ -122,6 +121,9 @@ void SceneGraph::Destroy(Actor* actor)
         auto& siblings = actor->parent->children;
         siblings.erase(std::remove(siblings.begin(), siblings.end(), actor), siblings.end());
     }
+    names.erase(actor->Name());
+    owned.erase(actor);
+    membershipDirty = true;
     actors.erase(std::remove_if(actors.begin(),
                      actors.end(),
                      [actor](const std::unique_ptr<Actor>& entry)
@@ -135,89 +137,206 @@ void SceneGraph::Clear()
 {
     CheckMutation();
     actors.clear();
+    names.clear();
+    owned.clear();
+    bindings.clear();
+    dynamicActors.clear();
+    chunks.clear();
+    for (auto& queue : queues)
+    {
+        queue.clear();
+    }
+    membershipDirty = true;
+}
+
+void SceneGraph::SetView(Point camera)
+{
+    view = camera;
+    hasView = true;
+}
+
+void SceneGraph::SetSpatial(Actor& actor)
+{
+    CheckMutation();
+    if (!Contains(&actor))
+    {
+        return;
+    }
+    actor.spatial = true;
+    membershipDirty = true;
+}
+
+void SceneGraph::RebuildMembership()
+{
+    if (!membershipDirty)
+    {
+        return;
+    }
+    Profile::Scope scope("scene_membership_rebuild");
+    bindings.clear();
+    dynamicActors.clear();
+    chunks.clear();
+    for (const auto& actor : actors)
+    {
+        if (actor->binding)
+        {
+            bindings.push_back(actor.get());
+        }
+        if (actor->spatial)
+        {
+            Point p = actor->Position();
+            chunks[{static_cast<int>(std::floor(p.x / 8)), static_cast<int>(std::floor(p.y / 8))}].push_back(
+                actor.get());
+        }
+        else
+        {
+            dynamicActors.push_back(actor.get());
+        }
+    }
+    membershipDirty = false;
 }
 
 void SceneGraph::Synchronize()
 {
-    for (const auto& actor : actors)
+    Profile::Scope scope("scene_transform_sync");
+    RebuildMembership();
+    transformsChanged = 0;
+    // Native transforms propagate in SetPosition; only legacy externally bound positions need polling.
+    for (Actor* actor : bindings)
     {
-        if (!actor->parent)
-        {
-            actor->Synchronize();
-        }
+        actor->Synchronize();
     }
+    Profile::Count("actor_transform_checks", static_cast<double>(bindings.size()));
+    Profile::Count("actor_transforms_changed", static_cast<double>(transformsChanged));
+}
+
+bool SceneGraph::ChunkVisible(int x, int y) const
+{
+    if (!hasView)
+    {
+        return true;
+    }
+    Point center = {x * 8.f + 4 - view.x, y * 8.f + 4 - view.y};
+    float sx = 640 + (center.x - center.y) * 28;
+    float sy = 420 + (center.x + center.y) * 15;
+    // An eight-cell chunk spans 448x240 pixels. Include tall trees, roofs and shadows.
+    return sx + 224 + 240 >= 0 && sx - 224 - 240 <= Renderer::Width && sy + 120 + 240 >= 0 &&
+           sy - 120 - 240 <= Renderer::Height;
 }
 
 void SceneGraph::Update(float dt)
 {
+    Profile::Scope scope("scene_update");
     TraversalGuard guard(traversing);
     Synchronize();
     for (const auto& actor : actors)
     {
-        if (actor->IsActive() && actor->update)
+        if (actor->update && actor->IsActive())
         {
             actor->update(dt);
         }
     }
-    Synchronize();
 }
 
 void SceneGraph::Render(Renderer& renderer)
 {
+    Profile::Scope scope("scene_render_cpu");
     TraversalGuard guard(traversing);
     Synchronize();
-    std::vector<Actor*> visible;
-    for (const auto& actor : actors)
+    RebuildMembership();
+    for (auto& queue : queues)
     {
-        if (actor->IsActive() && actor->IsVisible() && (!actor->renderCondition || actor->renderCondition()))
+        queue.clear();
+    }
+    uint64_t considered = 0, culledChunks = 0, culledActors = 0;
+    {
+        Profile::Scope collect("scene_visibility_collect");
+        auto add = [&](Actor* actor)
         {
-            visible.push_back(actor.get());
+            if (!actor->draw && !actor->shadow)
+            {
+                return;
+            }
+            ++considered;
+            if (actor->IsActive() && actor->IsVisible() &&
+                (!actor->renderCondition || actor->renderCondition()))
+            {
+                queues[static_cast<size_t>(actor->layer)].push_back(actor);
+            }
+        };
+        for (Actor* actor : dynamicActors)
+        {
+            add(actor);
+        }
+        for (const auto& chunk : chunks)
+        {
+            if (!ChunkVisible(chunk.first.first, chunk.first.second))
+            {
+                ++culledChunks;
+                culledActors += chunk.second.size();
+                continue;
+            }
+            for (Actor* actor : chunk.second)
+            {
+                add(actor);
+            }
         }
     }
-    std::stable_sort(visible.begin(),
-        visible.end(),
-        [](const Actor* a, const Actor* b)
-        {
-            if (a->layer != b->layer)
-            {
-                return a->layer < b->layer;
-            }
-            if (a->layer != ActorLayer::World)
-            {
-                return a->order < b->order;
-            }
-            Point pa = a->Position(), pb = b->Position();
-            return pa.x + pa.y < pb.x + pb.y;
-        });
-    for (Actor* actor : visible)
     {
-        if (actor->layer == ActorLayer::Ground && actor->draw)
+        Profile::Scope sort("scene_world_sort");
+        auto& world = queues[static_cast<size_t>(ActorLayer::World)];
+        std::sort(world.begin(),
+            world.end(),
+            [](const Actor* a, const Actor* b)
+            {
+                Point pa = a->Position(), pb = b->Position();
+                float da = pa.x + pa.y, db = pb.x + pb.y;
+                return da != db ? da < db : a->serial < b->serial;
+            });
+        Profile::Count("world_actors_sorted", static_cast<double>(world.size()));
+        for (ActorLayer layer : {ActorLayer::Effect, ActorLayer::Overlay})
         {
-            actor->draw(renderer, *actor);
+            auto& queue = queues[static_cast<size_t>(layer)];
+            std::sort(queue.begin(),
+                queue.end(),
+                [](const Actor* a, const Actor* b)
+                {
+                    return a->order != b->order ? a->order < b->order : a->serial < b->serial;
+                });
         }
     }
+    Profile::Gauge("actors_total", static_cast<double>(actors.size()));
+    Profile::Count("actors_visibility_tested", static_cast<double>(considered));
+    Profile::Count("spatial_chunks_culled", static_cast<double>(culledChunks));
+    Profile::Count("actors_chunk_culled", static_cast<double>(culledActors));
+    auto draw = [&](ActorLayer layer, const char* metric)
+    {
+        Profile::Scope phase(metric);
+        auto& queue = queues[static_cast<size_t>(layer)];
+        Profile::Count("actors_render_queued", static_cast<double>(queue.size()));
+        for (Actor* actor : queue)
+        {
+            if (actor->draw)
+            {
+                actor->draw(renderer, *actor);
+            }
+        }
+    };
+    draw(ActorLayer::Ground, "scene_ground_emit");
     renderer.BeginShadows();
-    for (Actor* actor : visible)
     {
-        if (actor->layer == ActorLayer::World && actor->shadow)
+        Profile::Scope phase("scene_shadow_emit");
+        for (Actor* actor : queues[static_cast<size_t>(ActorLayer::World)])
         {
-            actor->shadow(renderer, *actor);
+            if (actor->shadow)
+            {
+                actor->shadow(renderer, *actor);
+            }
         }
     }
     renderer.EndShadows();
-    for (Actor* actor : visible)
-    {
-        if ((actor->layer == ActorLayer::World || actor->layer == ActorLayer::Effect) && actor->draw)
-        {
-            actor->draw(renderer, *actor);
-        }
-    }
+    draw(ActorLayer::World, "scene_world_emit");
+    draw(ActorLayer::Effect, "scene_effect_emit");
     renderer.FinishWorld();
-    for (Actor* actor : visible)
-    {
-        if (actor->layer == ActorLayer::Overlay && actor->draw)
-        {
-            actor->draw(renderer, *actor);
-        }
-    }
+    draw(ActorLayer::Overlay, "scene_ui_emit");
 }

@@ -1,5 +1,6 @@
 ﻿#include "stdafx.h"
 #include "LevelOne.h"
+#include "GameStorage.h"
 #include <algorithm>
 #include <cmath>
 
@@ -143,7 +144,7 @@ void LevelOne::DrawHud(Renderer& r)
         r.Text(656 - width * .5f, 655, prompt, Gold, 1.6f);
     }
 
-    if (saveFailed)
+    if (saveFailed || !GameStorage::LastSaveSucceeded())
     {
         r.Text(44, 673, "진행 저장 실패: 실행 폴더의 쓰기 권한을 확인하세요.", {1, .43f, .26f}, 1.3f);
     }
@@ -239,6 +240,8 @@ void LevelOne::DrawPanels(Renderer& r)
 void LevelOne::Render(Renderer& r)
 {
     r.Begin(clock, effects);
+    scene.SetView(camera);
     scene.Render(r);
     r.End();
+    map.ReportMetrics();
 }

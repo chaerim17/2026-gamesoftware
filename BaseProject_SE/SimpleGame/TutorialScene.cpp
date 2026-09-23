@@ -20,6 +20,7 @@ void Tutorial::BuildScene()
         Actor& actor = scene.Create("tree-" + std::to_string(i), &forest);
         t.actor = &actor;
         actor.BindPosition(t.pos);
+        scene.SetSpatial(actor);
         actor.renderCondition = [this, i]()
         {
             return Visible(trees[i].pos, 240);
@@ -42,6 +43,7 @@ void Tutorial::BuildScene()
         Actor& actor = scene.Create("house-" + std::to_string(i), &village);
         h.actor = &actor;
         actor.BindPosition(h.pos);
+        scene.SetSpatial(actor);
         actor.renderCondition = [this, i]()
         {
             return Visible(houses[i].pos, 230);

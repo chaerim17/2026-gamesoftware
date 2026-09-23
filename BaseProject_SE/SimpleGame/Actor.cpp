@@ -1,5 +1,6 @@
 ﻿#include "stdafx.h"
 #include "Actor.h"
+#include "SceneGraph.h"
 #include <utility>
 
 Actor::Actor(std::string value) : name(std::move(value))
@@ -46,13 +47,29 @@ void Actor::BindPosition(Point& world)
 {
     binding = &world;
     previous = world;
+    if (scene)
+    {
+        scene->membershipDirty = true;
+    }
 }
 
 void Actor::Synchronize()
 {
     Point current = Position();
     Point delta = {current.x - previous.x, current.y - previous.y};
+    if (delta.x == 0 && delta.y == 0)
+    {
+        return;
+    }
     previous = current;
+    if (scene)
+    {
+        ++scene->transformsChanged;
+        if (spatial)
+        {
+            scene->membershipDirty = true;
+        }
+    }
 
     for (Actor* child : children)
     {
@@ -73,20 +90,32 @@ const std::vector<Actor*>& Actor::Children() const
 
 bool Actor::IsActive() const
 {
-    return active && (!parent || parent->IsActive());
+    return effectiveActive;
 }
 
 bool Actor::IsVisible() const
 {
-    return visible && (!parent || parent->IsVisible());
+    return effectiveVisible;
 }
 
 void Actor::SetActive(bool value)
 {
     active = value;
+    RefreshState();
 }
 
 void Actor::SetVisible(bool value)
 {
     visible = value;
+    RefreshState();
+}
+
+void Actor::RefreshState()
+{
+    effectiveActive = active && (!parent || parent->effectiveActive);
+    effectiveVisible = visible && (!parent || parent->effectiveVisible);
+    for (Actor* child : children)
+    {
+        child->RefreshState();
+    }
 }

@@ -1,5 +1,6 @@
 ﻿#include "stdafx.h"
 #include "LevelOne.h"
+#include "Profiler.h"
 #include <algorithm>
 #include <chrono>
 #include <cmath>
@@ -90,6 +91,7 @@ bool LevelOne::Visible(Point p, float margin) const
 
 void LevelOne::NewMap()
 {
+    Profile::Scope scope("level_generate");
     scene.Clear();
     lootRoot = popupRoot = nullptr;
     seed = FreshSeed();
@@ -326,6 +328,7 @@ void LevelOne::Defeat(Enemy& enemy)
 
 void LevelOne::ResolveAttack()
 {
+    Profile::Scope scope("combat_resolve");
     hitPending = false;
 
     for (Enemy& enemy : enemies)
@@ -363,6 +366,7 @@ void LevelOne::ResolveAttack()
 
 void LevelOne::UpdateEnemies(float dt)
 {
+    Profile::Scope scope("enemy_ai_update");
     bool campSafe = Distance(player, campPosition) < 4;
 
     for (Enemy& enemy : enemies)
@@ -456,6 +460,7 @@ bool LevelOne::GoalReady() const
 
 void LevelOne::Interact()
 {
+    Profile::Scope scope("interaction_pickup");
     if (!playerActor->IsActive())
     {
         return;
@@ -637,4 +642,9 @@ void LevelOne::Update(float dt)
             ++it;
         }
     }
+}
+
+bool LevelOne::EffectsEnabled() const
+{
+    return effects;
 }

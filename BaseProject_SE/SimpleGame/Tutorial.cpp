@@ -772,6 +772,12 @@ void Tutorial::Hud(Renderer& r)
 void Tutorial::Render(Renderer& r)
 {
     r.Begin(animation, postEffects);
+    scene.SetView(camera);
     scene.Render(r);
     r.End();
+}
+
+bool Tutorial::EffectsEnabled() const
+{
+    return postEffects;
 }

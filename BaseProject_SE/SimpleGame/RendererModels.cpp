@@ -1,6 +1,8 @@
 ﻿#include "stdafx.h"
 #include "Renderer.h"
 #include "GameStorage.h"
+#include "Profiler.h"
+#include <algorithm>
 #include <cmath>
 #include <cstring>
 #include <iostream>
@@ -71,11 +73,14 @@ bool Renderer::CreateModels()
 
     if (loaded)
     {
+        Profile::Count("model_mesh_cache_hits");
         std::cout << "모델 캐시 불러오기 완료\n";
         return true;
     }
 
+    Profile::Count("model_mesh_cache_misses");
     bytes.clear();
+    buildingModels = true;
 
     for (size_t i = 0; i < models.size(); ++i)
     {
@@ -90,6 +95,7 @@ bool Renderer::CreateModels()
     }
 
     vertices.clear();
+    buildingModels = false;
     GameStorage::Write(L"models.cache", Version, bytes);
     std::cout << "기본 도형 모델 생성 완료\n";
     return true;
@@ -308,23 +314,28 @@ void Renderer::BuildModel(ModelKind kind)
 void Renderer::Model(
     ModelKind kind, Point base, float scale, float opacity, float gait, int facing, float flash)
 {
+    ++modelInstances;
+    const auto& b = modelBounds[static_cast<size_t>(kind)];
     bool animal = kind == ModelKind::Boar || kind == ModelKind::Wolf || kind == ModelKind::Deer;
-
-    for (Vertex vertex : models[static_cast<size_t>(kind)])
+    int frame = animal ? static_cast<int>(gait * 8 / 6.2831853f) % 8 : 0;
+    if (frame < 0)
     {
-        if (animal && vertex.y > -14)
-        {
-            vertex.x += std::sin(gait + (vertex.x < 0 ? 3.14159f : 0)) * 2.5f;
-        }
-
-        vertex.x = base.x + vertex.x * scale * facing;
-        vertex.y = base.y + vertex.y * scale;
-        vertex.a *= opacity;
-        vertex.r += (1.f - vertex.r) * flash;
-        vertex.g += (1.f - vertex.g) * flash;
-        vertex.b += (1.f - vertex.b) * flash;
-        vertices.push_back(vertex);
+        frame += 8;
     }
+    float left = (frame * 256.f + 8) / 2048;
+    float top = (static_cast<int>(kind) * 256.f + 8) / 2048;
+    float right = left + (b.right - b.left) / 2048;
+    float bottom = top + (b.bottom - b.top) / 2048;
+    SurfaceQuad({base.x + b.left * scale * facing, base.y + b.top * scale},
+        {base.x + b.right * scale * facing, base.y + b.top * scale},
+        {base.x + b.right * scale * facing, base.y + b.bottom * scale},
+        {base.x + b.left * scale * facing, base.y + b.bottom * scale},
+        {left, 1 - top},
+        {right, 1 - top},
+        {right, 1 - bottom},
+        {left, 1 - bottom},
+        Material::ModelSprite,
+        {flash, 0, 0, opacity});
 }
 
 void Renderer::Flame(Point base, float scale)
@@ -353,4 +364,118 @@ bool Renderer::ToCanvas(int x, int y, Point& output) const
 
     output = {(x - viewportX) * Width / viewportW, (y - top) * Height / viewportH};
     return true;
+}
+
+void Renderer::ModelGeometry(ModelKind kind, Point base, float gait)
+{
+    const auto& model = models[static_cast<size_t>(kind)];
+    bool animal = kind == ModelKind::Boar || kind == ModelKind::Wolf || kind == ModelKind::Deer;
+    for (size_t i = 0; i < model.size(); i += 3)
+    {
+        Vertex v[3] = {model[i], model[i + 1], model[i + 2]};
+        for (Vertex& vertex : v)
+        {
+            if (animal && vertex.y > -14)
+            {
+                vertex.x += std::sin(gait + (vertex.x < 0 ? 3.14159f : 0)) * 2.5f;
+            }
+            vertex.x += base.x;
+            vertex.y += base.y;
+        }
+        SurfaceTriangle({v[0].x, v[0].y},
+            {v[1].x, v[1].y},
+            {v[2].x, v[2].y},
+            {v[0].u, v[0].v},
+            {v[1].u, v[1].v},
+            {v[2].u, v[2].v},
+            static_cast<Material>(static_cast<int>(v[0].kind)),
+            {v[0].r, v[0].g, v[0].b, v[0].a});
+    }
+}
+
+bool Renderer::CreateModelAtlas()
+{
+    Profile::Scope scope("model_atlas_initialize");
+    constexpr uint32_t Version = 1;
+    constexpr size_t PixelBytes = 2048 * 2048 * 4;
+    for (size_t i = 0; i < models.size(); ++i)
+    {
+        ModelBounds b = {4096, 4096, -4096, -4096};
+        for (const Vertex& v : models[i])
+        {
+            b.left = std::min(b.left, v.x);
+            b.right = std::max(b.right, v.x);
+            b.top = std::min(b.top, v.y);
+            b.bottom = std::max(b.bottom, v.y);
+        }
+        b.left = std::floor(b.left) - 4;
+        b.right = std::ceil(b.right) + 4;
+        b.top = std::floor(b.top) - 2;
+        b.bottom = std::ceil(b.bottom) + 2;
+        if (b.right - b.left > 240 || b.bottom - b.top > 240)
+        {
+            return false;
+        }
+        modelBounds[i] = b;
+    }
+    std::vector<unsigned char> pixels;
+    bool cached =
+        GameStorage::Read(L"model-atlas.cache", Version, PixelBytes, pixels) && pixels.size() == PixelBytes;
+    if (cached)
+    {
+        glActiveTexture(GL_TEXTURE0);
+        glGenTextures(1, &modelAtlas);
+        glBindTexture(GL_TEXTURE_2D, modelAtlas);
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, 2048, 2048, 0, GL_RGBA, GL_UNSIGNED_BYTE, pixels.data());
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+        Profile::Count("model_atlas_cache_hits");
+    }
+    else
+    {
+        GLuint fbo = 0, texture = 0;
+        if (!Target(fbo, texture, 2048, 2048, GL_RGBA8))
+        {
+            glDeleteFramebuffers(1, &fbo);
+            glDeleteTextures(1, &texture);
+            return false;
+        }
+        canvasW = canvasH = 2048;
+        glViewport(0, 0, 2048, 2048);
+        glClearColor(0, 0, 0, 0);
+        glClear(GL_COLOR_BUFFER_BIT);
+        glDisable(GL_DEPTH_TEST);
+        glDisable(GL_CULL_FACE);
+        glEnable(GL_BLEND);
+        glBlendFuncSeparate(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
+        for (size_t kind = 0; kind < models.size(); ++kind)
+        {
+            for (int frame = 0; frame < 8; ++frame)
+            {
+                const auto& b = modelBounds[kind];
+                ModelGeometry(static_cast<ModelKind>(kind),
+                    {frame * 256.f + 8 - b.left, kind * 256.f + 8 - b.top},
+                    frame * 6.2831853f / 8);
+            }
+        }
+        Flush();
+        modelAtlas = texture;
+        canvasW = Width;
+        canvasH = Height;
+        glBindFramebuffer(GL_FRAMEBUFFER, 0);
+        glDeleteFramebuffers(1, &fbo);
+        pixels.resize(PixelBytes);
+        glActiveTexture(GL_TEXTURE0);
+        glBindTexture(GL_TEXTURE_2D, modelAtlas);
+        glGetTexImage(GL_TEXTURE_2D, 0, GL_RGBA, GL_UNSIGNED_BYTE, pixels.data());
+        GameStorage::Write(L"model-atlas.cache", Version, pixels);
+        Profile::Count("model_atlas_cache_misses");
+    }
+    GLint width = 0;
+    glBindTexture(GL_TEXTURE_2D, modelAtlas);
+    glGetTexLevelParameteriv(GL_TEXTURE_2D, 0, GL_TEXTURE_WIDTH, &width);
+    Profile::Gauge("model_atlas_gpu_bytes", static_cast<double>(PixelBytes));
+    return width == 2048;
 }

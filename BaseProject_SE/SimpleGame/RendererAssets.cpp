@@ -4,6 +4,7 @@
 #endif
 #include "Renderer.h"
 #include "GameStorage.h"
+#include "Profiler.h"
 #include <windows.h>
 #include <unordered_map>
 #include <cmath>
@@ -61,6 +62,8 @@ struct Renderer::FontCache
             return q == glyphs.end() ? Glyph{0, 0, 24} : q->second;
         }
 
+        Profile::Count("font_glyph_cache_misses");
+        Profile::Scope glyphScope("font_glyph_raster_upload");
         PatBlt(dc, 0, 0, Cell, Cell, BLACKNESS);
         TextOutW(dc, 2, 0, &ch, 1);
         GdiFlush();
@@ -87,6 +90,7 @@ struct Renderer::FontCache
 
 bool Renderer::CreateAssets()
 {
+    Profile::Scope scope("render_assets_initialize");
     font = new FontCache();
     font->dc = CreateCompatibleDC(nullptr);
 
@@ -139,7 +143,7 @@ bool Renderer::CreateAssets()
     font->Get(L'?', fontTex);
     BakeCharacters();
 
-    return sprites != 0 && fontTex != 0 && CreateModels();
+    return sprites != 0 && fontTex != 0 && CreateModels() && CreateModelAtlas();
 }
 
 void Renderer::ReleaseAssets()
@@ -198,6 +202,7 @@ float Renderer::TextWidth(const std::string& text, float scale)
 
 void Renderer::Text(float x, float y, const std::string& text, Color color, float scale, float maxWidth)
 {
+    Profile::Scope scope("text_layout_emit");
     if (!font)
         return;
 
@@ -251,10 +256,12 @@ void Renderer::BakeCharacters()
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+        Profile::Count("character_atlas_cache_hits");
         std::cout << "캐릭터 애니메이션 캐시 불러오기 완료\n";
         return;
     }
 
+    Profile::Count("character_atlas_cache_misses");
     GLuint atlasFbo = 0;
 
     if (!Target(atlasFbo, sprites, 1536, 768, GL_RGBA8))

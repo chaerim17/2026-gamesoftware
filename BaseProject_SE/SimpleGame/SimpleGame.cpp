@@ -17,6 +17,8 @@ but WITHOUT ANY WARRANTY.
 #include "Renderer.h"
 #include "Tutorial.h"
 #include "LevelOne.h"
+#include "Profiler.h"
+#include "GameStorage.h"
 #include <string>
 
 namespace
@@ -34,15 +36,25 @@ namespace
             return;
         }
 
-        if (level)
+        Profile::Context(level ? "level_one" : "tutorial",
+            level ? level->EffectsEnabled() : tutorial->EffectsEnabled(),
+            GetForegroundWindow() == gameWindow);
         {
-            level->Render(*renderer);
+            Profile::Scope render("frame_render_cpu");
+            if (level)
+            {
+                level->Render(*renderer);
+            }
+            else if (tutorial)
+            {
+                tutorial->Render(*renderer);
+            }
         }
-        else if (tutorial)
         {
-            tutorial->Render(*renderer);
+            Profile::Scope present("swap_buffers_wait");
+            glutSwapBuffers();
         }
-        glutSwapBuffers();
+        renderer->LogFrame();
     }
 
     void Resize(int width, int height)
@@ -92,6 +104,7 @@ namespace
         // Free GPU objects while freeglut still has the current context.
         level.reset();
         tutorial.reset();
+        GameStorage::FlushPending();
         renderer.reset();
     }
 
@@ -108,6 +121,7 @@ namespace
 
         bool focused = GetForegroundWindow() == gameWindow;
 
+        Profile::Scope updateScope("game_update");
         if (level)
         {
             if (focused)
@@ -138,7 +152,15 @@ namespace
         }
 
         glutPostRedisplay();
-        glutTimerFunc(16, Tick, 0);
+        if (!Profile::Settings().uncapped)
+        {
+            glutTimerFunc(16, Tick, 0);
+        }
+    }
+
+    void Idle()
+    {
+        Tick(0);
     }
 }
 
@@ -146,18 +168,42 @@ int main(int argc, char** argv)
 {
     SetConsoleOutputCP(CP_UTF8);
     bool tutorialMode = false;
+    Profile::Options profileOptions;
 
     for (int i = 1; i < argc;)
     {
-        if (std::string(argv[i]) == "--tutorial")
+        std::string argument(argv[i]);
+        bool consumed = true;
+        if (argument == "--tutorial")
         {
             tutorialMode = true;
-
+        }
+        else if (argument == "--profile-per-frame")
+        {
+            profileOptions.perFrame = true;
+        }
+        else if (argument == "--profile-no-gpu")
+        {
+            profileOptions.gpu = false;
+        }
+        else if (argument == "--profile-gpu-every-frame")
+        {
+            profileOptions.gpuEvery = 1;
+        }
+        else if (argument == "--uncapped")
+        {
+            profileOptions.uncapped = true;
+        }
+        else
+        {
+            consumed = false;
+        }
+        if (consumed)
+        {
             for (int j = i; j < argc; ++j)
             {
                 argv[j] = argv[j + 1];
             }
-
             --argc;
         }
         else
@@ -197,12 +243,17 @@ int main(int argc, char** argv)
     {
     }
 
+    Profile::Start(profileOptions);
+    Profile::Metadata(reinterpret_cast<const char*>(glGetString(GL_RENDERER)),
+        reinterpret_cast<const char*>(glGetString(GL_VERSION)));
     renderer.reset(new Renderer(1280, 800));
 
     if (!renderer->IsInitialized())
     {
         std::cerr << "렌더러 초기화에 실패했습니다.\n";
         renderer.reset();
+        GameStorage::Shutdown();
+        Profile::Stop();
 
         return 1;
     }
@@ -215,6 +266,7 @@ int main(int argc, char** argv)
     {
         level.reset(new LevelOne());
     }
+    Profile::Checkpoint("startup_complete");
     glutSetOption(GLUT_ACTION_ON_WINDOW_CLOSE, GLUT_ACTION_CONTINUE_EXECUTION);
     glutIgnoreKeyRepeat(1);
     glutDisplayFunc(Display);
@@ -224,11 +276,20 @@ int main(int argc, char** argv)
     glutMouseFunc(Mouse);
     glutCloseFunc(Close);
     previousTime = glutGet(GLUT_ELAPSED_TIME);
-    glutTimerFunc(16, Tick, 0);
+    if (profileOptions.uncapped)
+    {
+        glutIdleFunc(Idle);
+    }
+    else
+    {
+        glutTimerFunc(16, Tick, 0);
+    }
     glutMainLoop();
     level.reset();
     tutorial.reset();
+    GameStorage::Shutdown();
     renderer.reset();
+    Profile::Stop();
 
     return 0;
 }

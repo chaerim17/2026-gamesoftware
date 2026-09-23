@@ -1,5 +1,6 @@
 ﻿#pragma once
 #include <array>
+#include "GpuProfiler.h"
 #include <vector>
 #include <string>
 #include "Dependencies/glew.h"
@@ -29,7 +30,8 @@ enum class Material
     Thatch = 7,
     Sprite = 8,
     Font = 9,
-    Flame = 10
+    Flame = 10,
+    ModelSprite = 11
 };
 
 enum class ModelKind
@@ -64,6 +66,7 @@ class Renderer
     void EndShadows();
     void FinishWorld();
     void End();
+    void LogFrame();
     void Triangle(Point a, Point b, Point c, Color color);
     void Quad(Point a, Point b, Point c, Point d, Color color);
     void SurfaceTriangle(
@@ -103,6 +106,19 @@ class Renderer
     {
         float x, y, r, g, b, a, u, v, kind;
     };
+
+    struct Instance
+    {
+        Point positions[4];
+        Point uvs[4];
+        Color color;
+        float kind;
+    };
+
+    struct ModelBounds
+    {
+        float left, top, right, bottom;
+    };
     struct FontCache;
     void Push(Point p, Color c, Point uv = {0, 0}, Material m = Material::Solid);
     void Flush();
@@ -114,6 +130,16 @@ class Renderer
     void BakeCharacters();
     bool CreateModels();
     void BuildModel(ModelKind kind);
+    bool CreateModelAtlas();
+    void ModelGeometry(ModelKind kind, Point base, float gait);
+    GpuProfiler gpu;
+    bool buildingModels = false;
+    GLuint modelAtlas = 0;
+    std::vector<Instance> instances;
+    std::array<ModelBounds, static_cast<size_t>(ModelKind::Count)> modelBounds{};
+    size_t instanceBufferBytes = 0;
+    uint64_t modelInstances = 0;
+    const char* currentPass = "startup";
     GLuint program = 0, post = 0, vao = 0, vbo = 0;
     GLuint sceneFbo = 0, sceneTex = 0, shadowFbo = 0, shadowTex = 0;
     GLuint bloomFbo[2] = {}, bloomTex[2] = {};
@@ -124,8 +150,6 @@ class Renderer
     int windowHeight = 800;
     int viewportX = 0, viewportY = 0, viewportW = 1280, viewportH = 800;
     bool initialized = false, worldFinished = false, postEnabled = true;
-    unsigned int drawCallCount = 0;
-    unsigned long long frameCount = 0;
     std::vector<Vertex> vertices;
     std::array<std::vector<Vertex>, static_cast<size_t>(ModelKind::Count)> models;
 };

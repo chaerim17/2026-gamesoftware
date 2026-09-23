@@ -14,6 +14,7 @@ class LevelOne
     LevelOne();
     ~LevelOne();
     void Update(float dt);
+    bool EffectsEnabled() const;
     void Render(Renderer& renderer);
     void KeyDown(unsigned char key);
     void KeyUp(unsigned char key);

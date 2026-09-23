@@ -165,6 +165,8 @@
     <ClInclude Include="LevelOne.h" />
     <ClInclude Include="Actor.h" />
     <ClInclude Include="SceneGraph.h" />
+    <ClInclude Include="Profiler.h" />
+    <ClInclude Include="GpuProfiler.h" />
     <ClInclude Include="Renderer.h" />
     <ClInclude Include="Tutorial.h" />
     <ClInclude Include="stdafx.h" />
@@ -181,6 +183,9 @@
     <ClCompile Include="SceneGraph.cpp" />
     <ClCompile Include="LevelOneScene.cpp" />
     <ClCompile Include="TutorialScene.cpp" />
+    <ClCompile Include="Profiler.cpp" />
+    <ClCompile Include="GpuProfiler.cpp" />
+    <ClCompile Include="SaveWorker.cpp" />
     <ClCompile Include="Renderer.cpp" />
     <ClCompile Include="Tutorial.cpp" />
     <ClCompile Include="TutorialWorld.cpp" />

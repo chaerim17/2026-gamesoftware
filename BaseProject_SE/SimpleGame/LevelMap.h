@@ -32,8 +32,10 @@ class LevelMap
     Point Camp() const;
     const std::vector<int>& OpenCells() const;
     bool IsConnected() const;
+    void ReportMetrics() const;
 
   private:
+    mutable uint64_t collisionQueries = 0, lineQueries = 0;
     std::array<Tile, Count> cells{};
     std::vector<int> openCells;
 };

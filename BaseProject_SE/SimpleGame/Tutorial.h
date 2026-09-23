@@ -10,6 +10,7 @@ class Tutorial
   public:
     Tutorial();
     void Update(float dt);
+    bool EffectsEnabled() const;
     void Render(Renderer& r);
     void KeyDown(unsigned char key);
     void KeyUp(unsigned char key);
