@@ -28,6 +28,7 @@
       <Filter>헤더 파일</Filter>
     </ClInclude>
     <ClInclude Include="Tutorial.h"><Filter>헤더 파일</Filter></ClInclude>
+    <ClInclude Include="Monitor.h" />
     <ClInclude Include="GameStorage.h">
       <Filter>헤더 파일</Filter>
     </ClInclude>
@@ -54,6 +55,7 @@
     <ClCompile Include="TutorialWorld.cpp"><Filter>소스 파일</Filter></ClCompile>
     <ClCompile Include="RendererAssets.cpp"><Filter>소스 파일</Filter></ClCompile>
     <ClCompile Include="Tutorial.cpp"><Filter>소스 파일</Filter></ClCompile>
+    <ClCompile Include="Monitor.cpp" />
     <ClCompile Include="GameStorage.cpp">
       <Filter>소스 파일</Filter>
     </ClCompile>

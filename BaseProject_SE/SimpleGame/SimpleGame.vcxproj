@@ -159,6 +159,7 @@
     <Text Include="ReadMe.txt" />
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="Monitor.h" />
     <ClInclude Include="GameStorage.h" />
     <ClInclude Include="PlayerProgress.h" />
     <ClInclude Include="LevelMap.h" />
@@ -169,6 +170,7 @@
     <ClInclude Include="targetver.h" />
   </ItemGroup>
   <ItemGroup>
+    <ClCompile Include="Monitor.cpp" />
     <ClCompile Include="GameStorage.cpp" />
     <ClCompile Include="PlayerProgress.cpp" />
     <ClCompile Include="LevelMap.cpp" />
@@ -192,6 +194,13 @@
     <None Include="Shaders\SolidRect.vs" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+  <Target Name="CopyMonitorFiles" AfterTargets="Build">
+    <ItemGroup>
+      <MonitorFiles Include="$(ProjectDir)..\Monitor\server.py;$(ProjectDir)..\Monitor\index.html" />
+    </ItemGroup>
+    <MakeDir Directories="$(TargetDir)Monitor" />
+    <Copy SourceFiles="@(MonitorFiles)" DestinationFolder="$(TargetDir)Monitor" SkipUnchangedFiles="true" />
+  </Target>
   <ImportGroup Label="ExtensionTargets">
   </ImportGroup>
 </Project>

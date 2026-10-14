@@ -13,6 +13,7 @@ class Tutorial
     void KeyDown(unsigned char key);
     void KeyUp(unsigned char key);
     void ClearInput();
+    std::string MonitorJson() const;
 
     bool WantsQuit() const
     {

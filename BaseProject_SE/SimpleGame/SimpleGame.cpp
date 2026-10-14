@@ -17,6 +17,7 @@ but WITHOUT ANY WARRANTY.
 #include "Renderer.h"
 #include "Tutorial.h"
 #include "LevelOne.h"
+#include "Monitor.h"
 #include <string>
 
 namespace
@@ -137,6 +138,13 @@ namespace
             return;
         }
 
+        static int lastMonitorTime = -1000;
+        if (now - lastMonitorTime >= 1000)
+        {
+            Monitor::Publish(level ? level->MonitorJson() : tutorial->MonitorJson(), focused);
+            lastMonitorTime = now;
+        }
+
         glutPostRedisplay();
         glutTimerFunc(16, Tick, 0);
     }
@@ -215,6 +223,7 @@ int main(int argc, char** argv)
     {
         level.reset(new LevelOne());
     }
+    Monitor::StartServer();
     glutSetOption(GLUT_ACTION_ON_WINDOW_CLOSE, GLUT_ACTION_CONTINUE_EXECUTION);
     glutIgnoreKeyRepeat(1);
     glutDisplayFunc(Display);
