@@ -54,6 +54,7 @@
     </ClCompile>
     <ClCompile Include="TutorialWorld.cpp"><Filter>소스 파일</Filter></ClCompile>
     <ClCompile Include="RendererAssets.cpp"><Filter>소스 파일</Filter></ClCompile>
+    <ClCompile Include="TutorialSimulation.cpp" />
     <ClCompile Include="Tutorial.cpp"><Filter>소스 파일</Filter></ClCompile>
     <ClCompile Include="Monitor.cpp" />
     <ClCompile Include="GameStorage.cpp">
@@ -68,6 +69,7 @@
     <ClCompile Include="RendererModels.cpp">
       <Filter>소스 파일</Filter>
     </ClCompile>
+    <ClCompile Include="LevelOneNpcs.cpp" />
     <ClCompile Include="LevelOne.cpp">
       <Filter>소스 파일</Filter>
     </ClCompile>

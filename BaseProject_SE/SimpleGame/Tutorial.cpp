@@ -25,7 +25,7 @@ namespace
     }
 }
 
-Tutorial::Tutorial()
+Tutorial::Tutorial(bool test) : villageTest(test)
 {
     Reset();
 }
@@ -146,9 +146,18 @@ void Tutorial::Reset()
         {{-25, -20}, {-25, -20}, 2, 0, 12, 1},
         {{-20, -28}, {-20, -28}, 2, 0, 13, 1}};
     trees.clear();
+    if (villageTest)
+    {
+        BuildSimulation();
+    }
+    else
+    {
+        // Keep only the elder, scout and four local guides in the introduction.
+        npcs.resize(6);
+    }
     // Deterministic scenery, with protected quest corridors and interaction spaces.
-    for (int x = -33; x <= 32; x += 3)
-        for (int y = -33; y <= 27; y += 3)
+    for (int x = MinX + 1; x <= MaxX - 2; x += 3)
+        for (int y = MinY + 1; y <= MaxY - 1; y += 3)
         {
             unsigned h = static_cast<unsigned>((x + 59) * 173 + (y + 61) * 419);
             Vec p = {x + (h % 7) * .13f, y + ((h / 7) % 7) * .13f};
@@ -182,6 +191,7 @@ void Tutorial::Reset()
 
             trees.push_back({p, .8f + (h % 5) * .12f});
         }
+    BuildNavigation();
 }
 
 float Tutorial::Distance(Vec a, Vec b)
@@ -208,7 +218,7 @@ Point Tutorial::Project(Vec p, float height) const
 
 bool Tutorial::Walkable(Vec p) const
 {
-    if (p.x < -34 || p.x > 34 || p.y < -34 || p.y > 28)
+    if (p.x < MinX || p.x > MaxX || p.y < MinY || p.y > MaxY)
         return false;
 
     float lx = (p.x - lake.x) / 7.65f, ly = (p.y - lake.y) / 9.45f;
@@ -296,6 +306,8 @@ int Tutorial::Nearest() const
 
     for (size_t i = 0; i < npcs.size(); ++i)
     {
+        if (npcs[i].health <= 0)
+            continue;
         float d = Distance(player, npcs[i].pos);
 
         if (d < best)
@@ -320,6 +332,8 @@ int Tutorial::Nearest() const
 
         for (size_t i = 0; i < animals.size(); ++i)
         {
+            if (animals[i].health <= 0)
+                continue;
             float d = Distance(player, animals[i].pos);
 
             if (d < range)
@@ -412,7 +426,12 @@ void Tutorial::Interact()
     }
     else if (n >= 0 && n < static_cast<int>(npcs.size()))
     {
-        Speak(npcs[n].name, {npcs[n].line});
+        const auto& person = npcs[n];
+        Speak(person.name,
+            {person.line,
+                std::string(RoleName(person.role)) + " / " + person.personality + "\n목표: " + person.goal +
+                    " · 현재: " + person.action +
+                    (person.memory.empty() ? "" : "\n" + person.knowledgeSource + ": " + person.memory)});
     }
 }
 
@@ -430,6 +449,12 @@ void Tutorial::KeyDown(unsigned char raw)
         return;
 
     keys[key] = true;
+
+    if (villageTest && key == 'f' && !paused && dialogue.empty())
+    {
+        VillageAttack();
+        return;
+    }
 
     if (key == 27)
     {
@@ -475,8 +500,10 @@ void Tutorial::KeyDown(unsigned char raw)
     if (quest == Quest::Complete && !paused)
     {
         if (key == 'r')
+        {
             Reset();
-        return;
+            return;
+        }
     }
 
     if (key == 'e' || (key == ' ' && !dialogue.empty()))
@@ -490,7 +517,7 @@ void Tutorial::KeyUp(unsigned char key)
 
 void Tutorial::Update(float dt)
 {
-    if (paused || quest == Quest::Complete)
+    if (paused)
         return;
 
     elapsed += dt > 0 ? dt : 0;
@@ -535,26 +562,9 @@ void Tutorial::Update(float dt)
     camera.x += (player.x - camera.x) * smooth;
     camera.y += (player.y - camera.y) * smooth;
 
-    for (size_t i = 2; i < npcs.size(); ++i)
+    if (villageTest)
     {
-        Npc& n = npcs[i];
-        n.walking = false;
-
-        if (!dialogue.empty())
-            continue;
-
-        Vec next = {n.home.x + std::sin(animation * .35f + i) * .55f,
-            n.home.y + std::cos(animation * .27f + i) * .40f};
-        float d = Distance(n.pos, next);
-
-        if (Walkable(next) && d > .001f)
-        {
-            float dx = (next.x - n.pos.x) - (next.y - n.pos.y), dy = (next.x - n.pos.x) + (next.y - n.pos.y);
-            n.direction = std::fabs(dx) > std::fabs(dy) ? (dx < 0 ? 1 : 2) : (dy < 0 ? 3 : 0);
-            n.gait += d * 3.5f;
-            n.pos = next;
-            n.walking = true;
-        }
+        UpdateSimulation(dt);
     }
 }
 
@@ -586,7 +596,7 @@ void Tutorial::MiniMap(Renderer& r)
     r.Text(1050, 34, "계곡 지도", Cream, 1.6f);
     auto pos = [](Vec v) -> Point
     {
-        return {1145 + (v.x - v.y) * 1.35f, 133 + (v.x + v.y) * .74f};
+        return {1145 + (v.x - v.y) * 0.675f, 133 + (v.x + v.y) * .37f};
     };
     auto path = [&](Vec a, Vec b)
     {
@@ -650,13 +660,21 @@ void Tutorial::Hud(Renderer& r)
     if (map)
         MiniMap(r);
     r.Rect(24, 750, 1232, 34, Ink);
-    r.Text(
-        40, 754, "WASD 이동    E 상호작용    Tab 지도    H 도움말    Esc 일시정지    P 후처리", Cream, 1.4f);
+    r.Text(40,
+        754,
+        "WASD 이동    F 공격    E 상호작용    Tab 지도    H 도움말    Esc 일시정지    P 후처리",
+        Cream,
+        1.4f);
     const char* region = player.x < -14 && player.y < -15 ? "늑대의 숲"
                          : player.y > 18                  ? "남쪽 초원"
                          : player.y < -6                  ? "소나무 숲길"
                          : player.x > 5 && player.y < 6   ? "갈대 호수"
                                                           : "잿골 마을";
+    r.Text(40,
+        680,
+        "마을 테스트 · 주민 " + std::to_string(npcs.size()) + "명 · 체력 " + std::to_string(playerHealth),
+        Cream,
+        1.2f);
     r.Text(40, 710, region, {.87f, .82f, .67f}, 1.65f);
     r.Text(1070, 711, postEffects ? "후처리 켜짐" : "후처리 꺼짐", {.67f, .73f, .66f}, 1.2f);
 
@@ -751,10 +769,12 @@ void Tutorial::Render(Renderer& r)
         items.push_back({houses[i].pos.x + houses[i].pos.y, 1, static_cast<int>(i)});
 
     for (size_t i = 0; i < npcs.size(); ++i)
-        items.push_back({npcs[i].pos.x + npcs[i].pos.y, 2, static_cast<int>(i)});
+        if (npcs[i].health > 0 && Visible(npcs[i].pos))
+            items.push_back({npcs[i].pos.x + npcs[i].pos.y, 2, static_cast<int>(i)});
 
     for (size_t i = 0; i < animals.size(); ++i)
-        items.push_back({animals[i].pos.x + animals[i].pos.y, 7, static_cast<int>(i)});
+        if (animals[i].health > 0 && Visible(animals[i].pos))
+            items.push_back({animals[i].pos.x + animals[i].pos.y, 7, static_cast<int>(i)});
     items.push_back({player.x + player.y, 3, 0});
     items.push_back({0, 4, 0});
     items.push_back({clue.x + clue.y, 5, 0});
@@ -785,6 +805,15 @@ void Tutorial::Render(Renderer& r)
                     false,
                     animation * 1.5f + item.index,
                     item.index);
+                if (Visible(npcs[item.index].pos))
+                {
+                    Point label = Project(npcs[item.index].pos, 82);
+                    r.Text(label.x - 30,
+                        label.y,
+                        std::string(RoleName(npcs[item.index].role)),
+                        npcs[item.index].color,
+                        .85f);
+                }
                 break;
 
             case 3:

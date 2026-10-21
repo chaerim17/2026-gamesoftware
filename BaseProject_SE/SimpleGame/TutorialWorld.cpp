@@ -1,6 +1,7 @@
 ﻿#include "stdafx.h"
 #include "Tutorial.h"
 #include <cmath>
+#include <algorithm>
 
 bool Tutorial::Visible(Vec p, float margin) const
 {
@@ -52,8 +53,12 @@ void Tutorial::Ground(Renderer& r)
 {
     r.Rect(0, 0, 1280, 800, {.13f, .20f, .19f});
 
-    for (int x = -37; x < 38; ++x)
-        for (int y = -37; y < 32; ++y)
+    for (int x = std::max(MinX - 3, static_cast<int>(camera.x) - 38);
+        x <= std::min(MaxX + 3, static_cast<int>(camera.x) + 38);
+        ++x)
+        for (int y = std::max(MinY - 3, static_cast<int>(camera.y) - 38);
+            y <= std::min(MaxY + 3, static_cast<int>(camera.y) + 38);
+            ++y)
         {
             Vec a = {static_cast<float>(x), static_cast<float>(y)};
 
@@ -101,9 +106,9 @@ void Tutorial::Ground(Renderer& r)
     // Water glints and waves are animated in the material shader.
 
     // Pebbles and grass are deterministic world details, culled before geometry work.
-    for (int i = 0; i < 1500; ++i)
+    for (int i = 0; i < 6000; ++i)
     {
-        Vec v = {-33 + ((i * 73) % 660) * .1f, -33 + ((i * 127) % 600) * .1f};
+        Vec v = {-67 + ((i * 73) % 1340) * .1f, -67 + ((i * 127) % 1220) * .1f};
 
         if (!Visible(v, 30))
             continue;
@@ -139,9 +144,9 @@ void Tutorial::Ground(Renderer& r)
         r.Triangle({p.x, p.y - 26}, {p.x + 17, p.y - 22 + flutter}, {p.x, p.y - 15}, {.72f, .30f, .20f});
     }
 
-    for (int i = -34; i <= 34; i += 2)
+    for (int i = MinX; i <= MaxX; i += 2)
     {
-        for (Vec v : {Vec{static_cast<float>(i), 28.5f}, Vec{static_cast<float>(i), -34.5f}})
+        for (Vec v : {Vec{static_cast<float>(i), MaxY + .5f}, Vec{static_cast<float>(i), MinY - .5f}})
         {
             if (!Visible(v, 40))
                 continue;
@@ -151,8 +156,8 @@ void Tutorial::Ground(Renderer& r)
         }
     }
 
-    for (int i = -34; i <= 28; i += 2)
-        for (float x : {-34.5f, 34.5f})
+    for (int i = MinY; i <= MaxY; i += 2)
+        for (float x : {MinX - .5f, MaxX + .5f})
         {
             Vec v = {x, static_cast<float>(i)};
 
@@ -187,13 +192,15 @@ void Tutorial::DrawShadows(Renderer& r)
         }
 
     for (const Npc& n : npcs)
-        if (Visible(n.pos))
-            r.SoftShadow(Project(n.pos), 10, 5, 25, .9f);
+        if (n.health > 0)
+            if (Visible(n.pos))
+                r.SoftShadow(Project(n.pos), 10, 5, 25, .9f);
     r.SoftShadow(Project(player), 11, 5, 28, .95f);
 
     for (const Animal& a : animals)
-        if (Visible(a.pos))
-            r.SoftShadow(Project(a.pos), 19, 6, 23, .8f);
+        if (a.health > 0)
+            if (Visible(a.pos))
+                r.SoftShadow(Project(a.pos), 19, 6, 23, .8f);
     r.EndShadows();
 }
 
@@ -256,17 +263,19 @@ const char* Tutorial::AnimalName(int kind)
 
 void Tutorial::UpdateAnimals(float dt)
 {
-    // Wildlife is observational in this tutorial: alert/flee behavior without combat locks.
+    // Combat and respawning are handled by the village simulation.
     if (!dialogue.empty())
         return;
 
     for (Animal& a : animals)
     {
+        if (a.health <= 0)
+            continue;
         float distance = Distance(player, a.pos), homeDistance = Distance(a.pos, a.home);
         Vec direction = {std::cos(animation * .27f + a.seed), std::sin(animation * .21f + a.seed)};
         float speed = .4f;
 
-        if (distance < (a.kind == 0 ? 5.f : 3.5f))
+        if (a.kind == 0 && distance < 5.f)
         {
             direction = {a.pos.x - player.x, a.pos.y - player.y};
             speed = a.kind == 0 ? 2.7f : 1.7f;
@@ -275,6 +284,26 @@ void Tutorial::UpdateAnimals(float dt)
         {
             direction = {player.x - a.pos.x, player.y - a.pos.y};
             speed = .65f;
+        }
+
+        if (a.kind > 0)
+        {
+            Vec prey = player;
+            float closest = Distance(player, fire) > 12 ? Distance(a.pos, player) : 1000.f;
+            for (const auto& n : npcs)
+            {
+                float d = Distance(a.pos, n.pos);
+                if (n.health > 0 && Distance(n.pos, fire) > 12 && d < closest)
+                {
+                    prey = n.pos;
+                    closest = d;
+                }
+            }
+            if (closest < 6)
+            {
+                direction = {prey.x - a.pos.x, prey.y - a.pos.y};
+                speed = 1.5f;
+            }
         }
 
         if (homeDistance > 7)

@@ -4,6 +4,7 @@
 #include <queue>
 #include <cmath>
 #include <cassert>
+#include <algorithm>
 
 bool LevelMap::Open(int index) const
 {
@@ -30,7 +31,7 @@ Point LevelMap::Center(int index) const
 
 Point LevelMap::Camp() const
 {
-    return Center((Height / 2) * Width + Width / 2);
+    return {-100.5f, 82.5f};
 }
 
 LevelMap::Tile LevelMap::At(int index) const
@@ -79,10 +80,9 @@ bool LevelMap::ClearLine(Point from, Point to) const
     return true;
 }
 
-std::array<int, LevelMap::Count> LevelMap::Distances(int start) const
+std::vector<int> LevelMap::Distances(int start) const
 {
-    std::array<int, Count> result;
-    result.fill(-1);
+    std::vector<int> result(Count, -1);
 
     if (!Open(start))
     {
@@ -121,7 +121,7 @@ std::array<int, LevelMap::Count> LevelMap::Distances(int start) const
     return result;
 }
 
-Point LevelMap::NextStep(Point from, Point target, const std::array<int, Count>& field) const
+Point LevelMap::NextStep(Point from, Point target, const std::vector<int>& field) const
 {
     int index = Index(from);
 
@@ -196,16 +196,16 @@ void LevelMap::Generate(uint32_t seed)
         }
     }
 
-    for (int pond = 0; pond < 5; ++pond)
+    for (int pond = 0; pond < 24; ++pond)
     {
         int cx = 7 + random() % (Width - 14);
         int cy = 7 + random() % (Height - 14);
-        float rx = 2.f + random() % 4;
-        float ry = 2.f + random() % 4;
+        float rx = 3.f + random() % 8;
+        float ry = 3.f + random() % 8;
 
-        for (int y = 1; y < Height - 1; ++y)
+        for (int y = std::max(1, cy - 11); y < std::min(Height - 1, cy + 12); ++y)
         {
-            for (int x = 1; x < Width - 1; ++x)
+            for (int x = std::max(1, cx - 11); x < std::min(Width - 1, cx + 12); ++x)
             {
                 float dx = (x - cx) / rx;
                 float dy = (y - cy) / ry;
@@ -218,47 +218,112 @@ void LevelMap::Generate(uint32_t seed)
         }
     }
 
-    for (int y = Height / 2 - 4; y <= Height / 2 + 4; ++y)
+    for (int y = Index(Camp()) / Width - 4; y <= Index(Camp()) / Width + 4; ++y)
     {
-        for (int x = Width / 2 - 4; x <= Width / 2 + 4; ++x)
+        for (int x = Index(Camp()) % Width - 4; x <= Index(Camp()) % Width + 4; ++x)
         {
             cells[y * Width + x] = Tile::Dirt;
         }
     }
 
-    // Join every isolated land component to the camp with a traversable land bridge.
-    while (true)
+    villages = {{"refugee_camp", "불씨 피난민 캠프", "부족의 불씨·휴식·소식 수집", Camp(), false},
+        {"homeland_ruins", "옛 고향의 폐허", "피난 흔적·가족 행방 조사", {-204.5f, 168.5f}, true},
+        {"road_market", "길목 교역마을 (임시)", "교역·호위·산적 위협", {-12.5f, -2.5f}, false},
+        {"other_refugees", "갈림길 정착지 (임시)", "다른 피난민·물자 교섭", {110.5f, 56.5f}, false},
+        {"first_fire_village",
+            "첫 불의 계곡 주민 마을",
+            "기존 주민의 삶·터전·정착 갈등",
+            {206.5f, -180.5f},
+            false}};
+    buildings.clear();
+    auto paint = [&](int x, int y)
     {
-        auto reachable = Distances(Index(Camp()));
-        int isolated = -1;
-
-        for (int i = 0; i < Count; ++i)
+        if (x > 0 && x < Width - 1 && y > 0 && y < Height - 1)
+            cells[y * Width + x] = Tile::Dirt;
+    };
+    // All settlements have clear plazas and three-cell-wide land routes.
+    for (const auto& village : villages)
+    {
+        int cx = Index(village.center) % Width, cy = Index(village.center) / Width;
+        for (int y = cy - 7; y <= cy + 7; ++y)
+            for (int x = cx - 7; x <= cx + 7; ++x)
+                paint(x, y);
+    }
+    const int journey[] = {1, 0, 2, 3, 4};
+    for (int step = 0; step < 4; ++step)
+    {
+        int source = Index(villages[journey[step]].center),
+            destination = Index(villages[journey[step + 1]].center);
+        int x = source % Width, y = source / Width, tx = destination % Width, ty = destination / Width;
+        while (x != tx)
         {
-            if (Open(i) && reachable[i] < 0)
+            for (int dy = -1; dy <= 1; ++dy)
+                paint(x, y + dy);
+            x += x < tx ? 1 : -1;
+        }
+        while (y != ty)
+        {
+            for (int dx = -1; dx <= 1; ++dx)
+                paint(x + dx, y);
+            y += y < ty ? 1 : -1;
+        }
+    }
+    for (size_t i = 0; i < villages.size(); ++i)
+    {
+        const auto& village = villages[i];
+        for (Point offset : {Point{-5.f, -5.f}, Point{4.f, -5.f}, Point{-5.f, 4.f}, Point{4.f, 4.f}})
+        {
+            Point position = {village.center.x + offset.x, village.center.y + offset.y};
+            int cell = Index(position);
+            buildings.push_back({position, static_cast<int>(i)});
+            // Visual cabins occupy the same two-by-two base in collision data.
+            cells[cell] = cells[cell + 1] = cells[cell + Width] = cells[cell + Width + 1] = Tile::Rock;
+        }
+    }
+
+    std::vector<bool> buildingFootprint(Count, false);
+    for (const auto& building : buildings)
+    {
+        int cell = Index(building.position);
+        buildingFootprint[cell] = buildingFootprint[cell + 1] = buildingFootprint[cell + Width] =
+            buildingFootprint[cell + Width + 1] = true;
+    }
+    // Connect disconnected land components using one visited mask.
+    auto reached = Distances(Index(Camp()));
+    int root = Index(Camp()), rootX = root % Width, rootY = root / Width;
+    for (int isolated = 0; isolated < Count; ++isolated)
+    {
+        if (!Open(isolated) || reached[isolated] >= 0)
+            continue;
+        int x = isolated % Width, y = isolated / Width;
+        while (x != rootX)
+        {
+            if (!buildingFootprint[y * Width + x])
+                cells[y * Width + x] = Tile::Dirt;
+            x += x < rootX ? 1 : -1;
+        }
+        while (y != rootY)
+        {
+            if (!buildingFootprint[y * Width + x])
+                cells[y * Width + x] = Tile::Dirt;
+            y += y < rootY ? 1 : -1;
+        }
+        std::queue<int> pending;
+        pending.push(isolated);
+        reached[isolated] = 0;
+        while (!pending.empty())
+        {
+            int cell = pending.front();
+            pending.pop();
+            for (int next : {cell - 1, cell + 1, cell - Width, cell + Width})
             {
-                isolated = i;
-                break;
+                if (next < 0 || next >= Count || !Open(next) || reached[next] >= 0)
+                    continue;
+                if (std::abs(next % Width - cell % Width) + std::abs(next / Width - cell / Width) != 1)
+                    continue;
+                reached[next] = 0;
+                pending.push(next);
             }
-        }
-
-        if (isolated < 0)
-        {
-            break;
-        }
-
-        int x = isolated % Width;
-        int y = isolated / Width;
-
-        while (x != Width / 2)
-        {
-            cells[y * Width + x] = Tile::Dirt;
-            x += x < Width / 2 ? 1 : -1;
-        }
-
-        while (y != Height / 2)
-        {
-            cells[y * Width + x] = Tile::Dirt;
-            y += y < Height / 2 ? 1 : -1;
         }
     }
 
@@ -272,4 +337,25 @@ void LevelMap::Generate(uint32_t seed)
             openCells.push_back(i);
         }
     }
+}
+
+const std::vector<LevelMap::Village>& LevelMap::Villages() const
+{
+    return villages;
+}
+
+const std::vector<LevelMap::Building>& LevelMap::Buildings() const
+{
+    return buildings;
+}
+
+int LevelMap::VillageAt(Point position) const
+{
+    for (size_t i = 0; i < villages.size(); ++i)
+    {
+        const auto& center = villages[i].center;
+        if (std::fabs(position.x - center.x) <= 8 && std::fabs(position.y - center.y) <= 8)
+            return static_cast<int>(i);
+    }
+    return -1;
 }

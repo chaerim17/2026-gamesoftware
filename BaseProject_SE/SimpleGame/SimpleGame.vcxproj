@@ -175,9 +175,11 @@
     <ClCompile Include="PlayerProgress.cpp" />
     <ClCompile Include="LevelMap.cpp" />
     <ClCompile Include="RendererModels.cpp" />
+    <ClCompile Include="LevelOneNpcs.cpp" />
     <ClCompile Include="LevelOne.cpp" />
     <ClCompile Include="LevelOneRender.cpp" />
     <ClCompile Include="Renderer.cpp" />
+    <ClCompile Include="TutorialSimulation.cpp" />
     <ClCompile Include="Tutorial.cpp" />
     <ClCompile Include="TutorialWorld.cpp" />
     <ClCompile Include="RendererAssets.cpp" />

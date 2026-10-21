@@ -99,6 +99,8 @@ bool PlayerProgress::SpendPoint(int attribute)
 
 bool PlayerProgress::Save() const
 {
+    // TODO: 게임 완성 단계에서 아래 저장/불러오기 구현 복구.
+    /*
     uint32_t values[] = {static_cast<uint32_t>(totalExperience),
         static_cast<uint32_t>(strength),
         static_cast<uint32_t>(vitality),
@@ -111,10 +113,14 @@ bool PlayerProgress::Save() const
     std::memcpy(bytes.data(), values, sizeof(values));
 
     return GameStorage::Write(L"progress.save", 1, bytes);
+    */
+    return true;
 }
 
 bool PlayerProgress::Load()
 {
+    // TODO: 게임 완성 단계에서 아래 저장/불러오기 구현 복구.
+    /*
     std::vector<unsigned char> bytes;
 
     if (!GameStorage::Read(L"progress.save", 1, 32, bytes) || bytes.size() != 32)
@@ -148,4 +154,6 @@ bool PlayerProgress::Load()
 
     *this = candidate;
     return true;
+    */
+    return false;
 }

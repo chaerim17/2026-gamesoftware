@@ -3,11 +3,18 @@
 #include <array>
 #include <vector>
 #include <string>
+#include <map>
 
 class Tutorial
 {
   public:
-    Tutorial();
+    explicit Tutorial(bool villageTest = false);
+
+    bool Completed() const
+    {
+        return !villageTest && quest == Quest::Complete;
+    }
+
     void Update(float dt);
     void Render(Renderer& r);
     void KeyDown(unsigned char key);
@@ -26,15 +33,60 @@ class Tutorial
         float x, y;
     };
 
+    enum class Role
+    {
+        Elder,
+        Seeker,
+        Guard,
+        Negotiator,
+        Hunter,
+        Merchant,
+        Soldier,
+        Refugee,
+        Mediator,
+        Farmer,
+        Priest,
+        Helper,
+        Bandit,
+        Villain,
+        Artisan
+    };
+
+    struct Event
+    {
+        int id;
+        float time;
+        std::string text;
+        Vec position;
+    };
+
     struct Npc
     {
         Vec home, pos;
         const char* name;
         const char* line;
-        Color color;
+        Color color = {1.f, 1.f, 1.f};
         float gait = 0;
         int direction = 0;
         bool walking = false;
+        Role role = Role::Artisan;
+        const char* personality = "성실함";
+        const char* goal = "생활 유지";
+        const char* need = "안전";
+        const char* ability = "생활 기술";
+        std::string action = "대기";
+        std::string memory;
+        std::string knowledgeSource;
+        float knowledgeTime = 0;
+        int knownEvent = 0;
+        int health = 100, coins = 20, supplies = 5;
+        float decision = 0, cooldown = 0, hunger = 0;
+        int routeStop = 0;
+        Vec target = {};
+        std::vector<Vec> path;
+        std::map<int, int> relations;
+        bool major = false;
+        bool resident = true;
     };
 
     struct House
@@ -55,6 +107,8 @@ class Tutorial
         int kind;
         float gait, seed;
         int facing;
+        int health = 50;
+        float respawn = 0, cooldown = 0;
     };
 
     struct DrawItem
@@ -71,6 +125,24 @@ class Tutorial
         Leave,
         Complete
     };
+    static constexpr int MinX = -68, MaxX = 68, MinY = -68, MaxY = 56;
+    static constexpr int GridWidth = MaxX - MinX + 1, GridHeight = MaxY - MinY + 1;
+    std::array<bool, GridWidth * GridHeight> reachable{};
+    std::array<unsigned char, GridWidth * GridHeight> navigationEdges{};
+    std::vector<Vec> navigation;
+    std::vector<Event> events;
+    int nextEvent = 1;
+    int playerHealth = 100;
+    float attackCooldown = 0;
+    void BuildSimulation();
+    void BuildNavigation();
+    void UpdateSimulation(float dt);
+    void VillageAttack();
+    void RecordEvent(Vec position, const std::string& text);
+    void Route(Npc& npc, Vec destination);
+    void MoveNpc(Npc& npc, float dt, float speed);
+    Vec SafePosition(Vec position) const;
+    static const char* RoleName(Role role);
     void Reset();
     Point Project(Vec p, float height = 0) const;
     bool Walkable(Vec p) const;
@@ -104,6 +176,7 @@ class Tutorial
     std::vector<Tree> trees;
     std::vector<Animal> animals;
     int facing = 0;
+    bool villageTest = false;
     bool postEffects = true;
     std::array<bool, 256> keys{};
     Quest quest = Quest::Elder;

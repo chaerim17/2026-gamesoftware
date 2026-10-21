@@ -17,14 +17,16 @@ namespace
 
 LevelOne::LevelOne()
 {
-    progress.Load();
+    // TODO: 게임 완성 단계에서 성장 정보 불러오기 복구.
+    // progress.Load();
     NewMap();
-    Notice("멧돼지와 늑대를 사냥해 레벨 3을 달성하세요. C에서 성장 포인트를 배분합니다.");
+    Notice("고향은 폐허가 되었습니다. 피난 흔적을 따라 북쪽의 사람들과 마을을 찾아가세요.");
 }
 
 LevelOne::~LevelOne()
 {
-    progress.Save();
+    // TODO: 게임 완성 단계에서 종료 시 성장 정보 저장 복구.
+    // progress.Save();
 }
 
 bool LevelOne::WantsQuit() const
@@ -34,7 +36,9 @@ bool LevelOne::WantsQuit() const
 
 void LevelOne::Save()
 {
-    saveFailed = !progress.Save();
+    // TODO: 게임 완성 단계에서 성장 정보 저장 복구.
+    // saveFailed = !progress.Save();
+    saveFailed = false;
 }
 
 void LevelOne::Notice(const std::string& text)
@@ -91,7 +95,7 @@ void LevelOne::NewMap()
     seed = FreshSeed();
     random.seed(seed);
     map.Generate(seed);
-    player = map.Camp();
+    player = map.Villages()[1].center;
     player.y += 2;
     camera = player;
     health = progress.MaxHealth();
@@ -103,7 +107,8 @@ void LevelOne::NewMap()
     popups.clear();
     panel = Panel::None;
     ClearInput();
-    flow = map.Distances(map.Index(player));
+    flowTarget = map.Index(player);
+    flow = map.Distances(flowTarget);
 
     std::vector<int> candidates = map.OpenCells();
     std::shuffle(candidates.begin(), candidates.end(), random);
@@ -112,7 +117,7 @@ void LevelOne::NewMap()
     {
         Point position = map.Center(cell);
 
-        if (Distance(position, map.Camp()) < 7 || !map.CanOccupy(position))
+        if (map.VillageAt(position) >= 0 || Distance(position, map.Camp()) < 7 || !map.CanOccupy(position))
         {
             continue;
         }
@@ -135,15 +140,19 @@ void LevelOne::NewMap()
         enemy.health = enemy.kind ? 56 : 42;
         enemies.push_back(enemy);
 
-        if (enemies.size() == 18)
+        if (enemies.size() == 320)
         {
             break;
         }
     }
 
+    worldEvents.clear();
+    nextWorldEvent = 1;
+    PlaceNpcs();
+
     loot.push_back({{map.Camp().x + 2, map.Camp().y}, 0, 2});
     loot.push_back({{map.Camp().x - 2, map.Camp().y}, 1, 1});
-    Notice("새 사냥터에 도착했습니다. 캠프의 보급품을 E로 챙길 수 있습니다.");
+    Notice("여러 거점이 흩어진 월드에 도착했습니다. 지도에서 마을을 찾아 이동하세요.");
 }
 
 void LevelOne::ClearInput()
@@ -348,6 +357,17 @@ void LevelOne::ResolveAttack()
             Defeat(enemy);
         }
     }
+    for (size_t i = 0; i < npcs.size(); ++i)
+    {
+        const auto& npc = npcs[i];
+        float distance = Distance(player, npc.position);
+        if (npc.health <= 0 || distance > 2.2f || !map.ClearLine(player, npc.position))
+            continue;
+        Point direction = Normalize({npc.position.x - player.x, npc.position.y - player.y});
+        if (distance > .4f && direction.x * attackAim.x + direction.y * attackAim.y < .38f)
+            continue;
+        HurtNpc(static_cast<int>(i), -1, progress.Attack());
+    }
 }
 
 void LevelOne::UpdateEnemies(float dt)
@@ -482,6 +502,66 @@ void LevelOne::Interact()
         return;
     }
 
+    int nearNpc = NearestNpc();
+    if (nearNpc >= 0)
+    {
+        auto& npc = npcs[nearNpc];
+        auto relation = npc.relations.find(-1);
+        if (relation != npc.relations.end() && relation->second < -10)
+        {
+            Notice(std::string(npc.name) + ": 당신을 믿지 않습니다.");
+            return;
+        }
+        if (npc.service == 0)
+        {
+            if (progress.hides >= 2 && progress.herbs < 999 && npc.supplies > 0)
+            {
+                progress.hides -= 2;
+                ++progress.herbs;
+                --npc.supplies;
+                Save();
+                NpcEvent(
+                    "trade", nearNpc, -1, npc.position, std::string(npc.name) + "이 플레이어와 물자 교환");
+                Notice(std::string(npc.name) + ": 가죽 2개를 약초 1개로 교환했습니다.");
+            }
+            else
+            {
+                Notice(std::string(npc.name) +
+                       ": 가죽 2개로 약초 1개를 교환합니다. 약초가 가득 차면 교환할 수 없습니다.");
+            }
+        }
+        else if (npc.service == 1)
+        {
+            if (npc.supplies <= 0)
+            {
+                Notice(std::string(npc.name) + ": 치료할 약초가 없습니다.");
+                return;
+            }
+            if (health >= progress.MaxHealth())
+            {
+                Notice(std::string(npc.name) + ": 이미 건강합니다.");
+                return;
+            }
+            --npc.supplies;
+            health = progress.MaxHealth();
+            Save();
+            NpcEvent("heal", nearNpc, -1, npc.position, std::string(npc.name) + "이 플레이어 치료");
+            Notice(std::string(npc.name) + ": 상처를 치료했습니다.");
+        }
+        else if (npc.service == 4)
+        {
+            panel = Panel::Stats;
+            ClearInput();
+            Notice(std::string(npc.name) + ": 경험치로 얻은 성장 포인트를 배분하세요.");
+        }
+        else
+        {
+            Notice(std::string(npc.name) + ": " + npc.line + " / " + npc.action +
+                   (npc.memory.empty() ? "" : " / " + npc.knowledgeSource + ": " + npc.memory));
+        }
+        return;
+    }
+
     if (Distance(player, map.Camp()) < 2)
     {
         health = progress.MaxHealth();
@@ -526,6 +606,7 @@ void LevelOne::Respawn()
     attackCooldown = 0;
     attackAge = 1;
     pathTimer = 0;
+    flowTarget = -1;
     panel = Panel::None;
     ClearInput();
     Notice("캠프로 돌아왔습니다. 경험치와 아이템은 유지됩니다.");
@@ -588,11 +669,17 @@ void LevelOne::Update(float dt)
 
     if (pathTimer <= 0)
     {
-        flow = map.Distances(map.Index(player));
+        int target = map.Index(player);
+        if (target != flowTarget)
+        {
+            flow = map.Distances(target);
+            flowTarget = target;
+        }
         pathTimer = .2f;
     }
 
     UpdateEnemies(dt);
+    UpdateNpcs(dt);
     float blend = 1 - std::exp(-dt * 6);
     camera.x += (player.x - camera.x) * blend;
     camera.y += (player.y - camera.y) * blend;

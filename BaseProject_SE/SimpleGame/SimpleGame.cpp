@@ -111,31 +111,39 @@ namespace
 
         if (level)
         {
-            if (focused)
-            {
-                level->Update(dt);
-            }
-            else
+            if (!focused)
             {
                 level->ClearInput();
             }
+            level->Update(dt);
         }
         else if (tutorial)
         {
-            if (focused)
-            {
-                tutorial->Update(dt);
-            }
-            else
+            if (!focused)
             {
                 tutorial->ClearInput();
             }
+            tutorial->Update(dt);
         }
 
         if ((level && level->WantsQuit()) || (tutorial && tutorial->WantsQuit()))
         {
             glutLeaveMainLoop();
             return;
+        }
+
+        if (tutorial && tutorial->Completed())
+        {
+            tutorial->ClearInput();
+            level.reset(new LevelOne());
+            tutorial.reset();
+            level->ClearInput();
+            previousTime = glutGet(GLUT_ELAPSED_TIME);
+            if (gameWindow)
+            {
+                SetWindowTextW(gameWindow, L"재와 갈대 - 첫 사냥터");
+            }
+            Monitor::Publish(level->MonitorJson(), focused);
         }
 
         static int lastMonitorTime = -1000;
@@ -153,13 +161,16 @@ namespace
 int main(int argc, char** argv)
 {
     SetConsoleOutputCP(CP_UTF8);
-    bool tutorialMode = false;
+    bool tutorialMode = false; // TODO: 게임 완성 단계에서 기본 튜토리얼 시작 복구.
+    // bool villageTest = false; // TODO: 튜토리얼 시작 분기 복구 시 함께 활성화.
 
     for (int i = 1; i < argc;)
     {
-        if (std::string(argv[i]) == "--tutorial")
+        if (std::string(argv[i]) == "--tutorial" || std::string(argv[i]) == "--level-one" ||
+            std::string(argv[i]) == "--village")
         {
-            tutorialMode = true;
+            // villageTest = std::string(argv[i]) == "--village";
+            // tutorialMode = std::string(argv[i]) != "--level-one";
 
             for (int j = i; j < argc; ++j)
             {
@@ -215,14 +226,18 @@ int main(int argc, char** argv)
         return 1;
     }
 
+    // TODO: 게임 완성 단계에서 아래 튜토리얼 시작 분기 복구.
+    /*
     if (tutorialMode)
     {
-        tutorial.reset(new Tutorial());
+        tutorial.reset(new Tutorial(villageTest));
     }
     else
     {
         level.reset(new LevelOne());
     }
+    */
+    level.reset(new LevelOne());
     Monitor::StartServer();
     glutSetOption(GLUT_ACTION_ON_WINDOW_CLOSE, GLUT_ACTION_CONTINUE_EXECUTION);
     glutIgnoreKeyRepeat(1);

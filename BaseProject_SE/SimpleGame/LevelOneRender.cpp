@@ -27,33 +27,49 @@ void LevelOne::DrawWorld(Renderer& r)
 
     std::vector<DrawItem> items;
 
-    for (int i = 0; i < LevelMap::Count; ++i)
-    {
-        Point center = map.Center(i);
-
-        if (!Visible(center, 150))
+    for (int y = std::max(0, static_cast<int>(camera.y) + LevelMap::Height / 2 - 38);
+        y < std::min(LevelMap::Height, static_cast<int>(camera.y) + LevelMap::Height / 2 + 39);
+        ++y)
+        for (int x = std::max(0, static_cast<int>(camera.x) + LevelMap::Width / 2 - 38);
+            x < std::min(LevelMap::Width, static_cast<int>(camera.x) + LevelMap::Width / 2 + 39);
+            ++x)
         {
-            continue;
-        }
+            int i = y * LevelMap::Width + x;
+            Point center = map.Center(i);
+            if (std::fabs(center.x - camera.x) > 38 || std::fabs(center.y - camera.y) > 38)
+                continue;
 
-        LevelMap::Tile tile = map.At(i);
-        Point a = {center.x - .5f, center.y - .5f};
-        Point b = {center.x + .5f, center.y - .5f};
-        Point c = {center.x + .5f, center.y + .5f};
-        Point d = {center.x - .5f, center.y + .5f};
-        Material material = tile == LevelMap::Tile::Water  ? Material::Water
-                            : tile == LevelMap::Tile::Dirt ? Material::Dirt
-                                                           : Material::Grass;
-        Color color = tile == LevelMap::Tile::Water  ? Color(.14f, .36f, .37f)
-                      : tile == LevelMap::Tile::Dirt ? Color(.44f, .36f, .24f)
-                                                     : Color(.27f, .33f, .20f);
-        r.SurfaceQuad(Project(a), Project(b), Project(c), Project(d), a, b, c, d, material, color);
+            if (!Visible(center, 150))
+            {
+                continue;
+            }
 
-        if (tile == LevelMap::Tile::Tree || tile == LevelMap::Tile::Rock)
-        {
-            items.push_back({center.x + center.y, tile == LevelMap::Tile::Tree ? 0 : 1, i});
+            LevelMap::Tile tile = map.At(i);
+            Point a = {center.x - .5f, center.y - .5f};
+            Point b = {center.x + .5f, center.y - .5f};
+            Point c = {center.x + .5f, center.y + .5f};
+            Point d = {center.x - .5f, center.y + .5f};
+            Material material = tile == LevelMap::Tile::Water  ? Material::Water
+                                : tile == LevelMap::Tile::Dirt ? Material::Dirt
+                                                               : Material::Grass;
+            Color color = tile == LevelMap::Tile::Water  ? Color(.14f, .36f, .37f)
+                          : tile == LevelMap::Tile::Dirt ? Color(.44f, .36f, .24f)
+                                                         : Color(.27f, .33f, .20f);
+            r.SurfaceQuad(Project(a), Project(b), Project(c), Project(d), a, b, c, d, material, color);
+
+            if (tile == LevelMap::Tile::Tree || tile == LevelMap::Tile::Rock)
+            {
+                bool foundation = false;
+                for (const auto& building : map.Buildings())
+                {
+                    int cell = map.Index(building.position);
+                    foundation = foundation || i == cell || i == cell + 1 || i == cell + LevelMap::Width ||
+                                 i == cell + LevelMap::Width + 1;
+                }
+                if (!foundation)
+                    items.push_back({center.x + center.y, tile == LevelMap::Tile::Tree ? 0 : 1, i});
+            }
         }
-    }
 
     r.BeginShadows();
 
@@ -71,6 +87,16 @@ void LevelOne::DrawWorld(Renderer& r)
         }
     }
 
+    for (const auto& npc : npcs)
+    {
+        if (npc.health > 0 && Visible(npc.position))
+            r.SoftShadow(Project(npc.position), 10, 5, 25, .9f);
+    }
+    for (const auto& building : map.Buildings())
+    {
+        if (Visible(building.position, 180))
+            r.SoftShadow(Project(building.position), 45, 18, 55, .8f);
+    }
     r.SoftShadow(Project(player), 11, 5, 28, .95f);
     r.EndShadows();
 
@@ -92,6 +118,17 @@ void LevelOne::DrawWorld(Renderer& r)
         }
     }
 
+    for (size_t i = 0; i < npcs.size(); ++i)
+    {
+        if (Visible(npcs[i].position))
+            items.push_back({npcs[i].position.x + npcs[i].position.y, 6, static_cast<int>(i)});
+    }
+    for (size_t i = 0; i < map.Buildings().size(); ++i)
+    {
+        const auto& building = map.Buildings()[i];
+        if (Visible(building.position, 180))
+            items.push_back({building.position.x + building.position.y, 7, static_cast<int>(i)});
+    }
     items.push_back({player.x + player.y, 4, 0});
     items.push_back({map.Camp().x + map.Camp().y, 5, 0});
     std::stable_sort(items.begin(),
@@ -148,6 +185,30 @@ void LevelOne::DrawWorld(Renderer& r)
                 5,
                 loot[item.index].kind == 0 ? Color(.40f, .80f, .40f, .35f) : Color(.92f, .68f, .29f, .35f));
         }
+        else if (item.type == 7)
+        {
+            const auto& building = map.Buildings()[item.index];
+            r.Model(map.Villages()[building.village].ruined ? ModelKind::Rock : ModelKind::Cabin,
+                Project(building.position),
+                1.2f);
+        }
+        else if (item.type == 6)
+        {
+            const auto& npc = npcs[item.index];
+            Point p = Project(npc.position);
+            if (npc.health <= 0)
+            {
+                r.Line({p.x - 6, p.y - 10}, {p.x + 6, p.y + 2}, 2, {.65f, .53f, .45f});
+                r.Line({p.x - 6, p.y + 2}, {p.x + 6, p.y - 10}, 2, {.65f, .53f, .45f});
+                r.Text(p.x - 30, p.y - 30, std::string(npc.name) + " 사망", {.75f, .55f, .45f}, .8f);
+                continue;
+            }
+            r.Character(
+                p, 1 + item.index % 5, npc.direction, npc.walking ? static_cast<int>(npc.gait) % 8 : 0);
+            r.Text(p.x - 35, p.y - 80, npc.name, {.9f, .85f, .67f}, 1.f);
+            if (npc.health < 100)
+                Bar(r, p.x - 20, p.y - 56, 40, 4, npc.health / 100.f, {.85f, .3f, .2f});
+        }
         else if (item.type == 4)
         {
             if (immunity == 0 || static_cast<int>(clock * 18) % 2 == 0 || health == 0)
@@ -160,6 +221,15 @@ void LevelOne::DrawWorld(Renderer& r)
             Point p = Project(map.Camp());
             r.Model(ModelKind::Camp, p);
             r.Flame(p);
+        }
+    }
+
+    for (const auto& village : map.Villages())
+    {
+        if (Visible(village.center, 180))
+        {
+            Point name = Project(village.center, 110);
+            r.Text(name.x - 60, name.y, village.name, {.95f, .85f, .6f}, 1.f);
         }
     }
 
@@ -181,25 +251,27 @@ void LevelOne::DrawWorld(Renderer& r)
 void LevelOne::DrawMap(Renderer& r)
 {
     r.Rect(1040, 24, 216, 214, Ink);
-    r.Text(1054, 34, "사냥터 지도", Cream, 1.5f);
+    r.Text(1054, 34, "여정의 월드 지도", Cream, 1.5f);
     auto position = [](Point p)
     {
-        return Point{1147 + (p.x - p.y) * 1.35f, 140 + (p.x + p.y) * .83f};
+        return Point{1147 + (p.x - p.y) * .16875f, 140 + (p.x + p.y) * .10375f};
     };
 
-    for (int i = 0; i < LevelMap::Count; ++i)
-    {
-        if (i % 2 != 0)
+    for (int y = 0; y < LevelMap::Height; y += 8)
+        for (int x = 0; x < LevelMap::Width; x += 8)
         {
-            continue;
-        }
+            int i = y * LevelMap::Width + x;
+            if (i % 2 != 0)
+            {
+                continue;
+            }
 
-        Point p = position(map.Center(i));
-        Color color = map.At(i) == LevelMap::Tile::Water ? Color(.18f, .40f, .43f)
-                      : map.Open(i)                      ? Color(.39f, .43f, .28f)
-                                                         : Color(.20f, .29f, .21f);
-        r.Rect(p.x, p.y, 1.8f, 1.5f, color);
-    }
+            Point p = position(map.Center(i));
+            Color color = map.At(i) == LevelMap::Tile::Water ? Color(.18f, .40f, .43f)
+                          : map.Open(i)                      ? Color(.39f, .43f, .28f)
+                                                             : Color(.20f, .29f, .21f);
+            r.Rect(p.x, p.y, 1.8f, 1.5f, color);
+        }
 
     for (const Enemy& enemy : enemies)
     {
@@ -210,17 +282,26 @@ void LevelOne::DrawMap(Renderer& r)
         }
     }
 
+    for (size_t i = 0; i < map.Villages().size(); ++i)
+    {
+        const auto& village = map.Villages()[i];
+        Point p = position(village.center);
+        r.Rect(p.x - 3, p.y - 3, 6, 6, village.ruined ? Color(.6f, .5f, .4f) : Gold);
+        r.Text(p.x + 4, p.y - 4, std::to_string(i + 1), Cream, .9f);
+    }
     Point camp = position(map.Camp());
     Point hero = position(player);
     r.Ellipse(camp.x, camp.y, 4, 4, Gold, 8);
     r.Ellipse(hero.x, hero.y, 3, 3, Cream, 8);
-    r.Text(1054, 207, "금색 캠프 / 붉은색 짐승", Cream, 1.1f);
+    r.Text(1054, 207, "금색 거점 / 붉은색 짐승", Cream, 1.1f);
 }
 
 void LevelOne::DrawHud(Renderer& r)
 {
+    int region = map.VillageAt(player);
+    r.Text(40, 700, region < 0 ? "마을 사이의 야생" : map.Villages()[region].name, Cream, 1.4f);
     r.Rect(24, 24, 700, 150, Ink);
-    r.Text(44, 32, "첫 레벨 · 사냥꾼의 첫걸음", Gold, 2.2f);
+    r.Text(44, 32, "첫 레벨 · 불씨를 따라가는 여정", Gold, 2.2f);
     r.Text(44, 73, "레벨 3 달성 → 성장 포인트 6개 배분 → 캠프로 귀환", Cream, 1.5f);
     r.Text(44,
         110,
@@ -278,11 +359,13 @@ void LevelOne::DrawHud(Renderer& r)
             nearLoot || (Distance(player, item.position) <= 1.6f && map.ClearLine(player, item.position));
     }
 
-    if (panel == Panel::None && health > 0 && (nearLoot || Distance(player, map.Camp()) < 2))
+    int nearNpc = NearestNpc();
+    if (panel == Panel::None && health > 0 && (nearLoot || nearNpc >= 0 || Distance(player, map.Camp()) < 2))
     {
-        std::string prompt = nearLoot      ? "[E] 아이템 획득"
-                             : GoalReady() ? "[E] 첫 레벨 완료"
-                                           : "[E] 캠프에서 회복";
+        std::string prompt = nearLoot       ? "[E] 아이템 획득"
+                             : nearNpc >= 0 ? "[E] " + std::string(npcs[nearNpc].name) + " 상호작용"
+                             : GoalReady()  ? "[E] 첫 레벨 완료"
+                                            : "[E] 캠프에서 회복";
         float width = r.TextWidth(prompt, 1.6f) + 32;
         r.Rect(640 - width * .5f, 650, width, 40, Ink);
         r.Text(656 - width * .5f, 655, prompt, Gold, 1.6f);
